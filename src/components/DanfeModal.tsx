@@ -1,6 +1,7 @@
 import React from 'react';
 import { Invoice } from '../types';
 import { formatBRL, formatDateBR } from '../utils/stockCalculations';
+import { getStoredCompanySettings } from '../utils/companySettings';
 import { X, Printer, CheckCircle, FileText } from 'lucide-react';
 
 interface DanfeModalProps {
@@ -125,11 +126,11 @@ export const DanfeModal: React.FC<DanfeModalProps> = ({ invoice, onClose }) => {
               <div className="grid grid-cols-12 gap-2 text-[11px]">
                 <div className="col-span-8">
                   <span className="text-slate-500">Nome / Razão Social: </span>
-                  <span className="font-semibold text-slate-900">{invoice.recipient?.name || 'Sua Empresa Ltda'}</span>
+                  <span className="font-semibold text-slate-900">{invoice.recipient?.name || getStoredCompanySettings().name}</span>
                 </div>
                 <div className="col-span-4">
                   <span className="text-slate-500">CNPJ / CPF: </span>
-                  <span className="font-semibold text-slate-900">{invoice.recipient?.cnpj || '12.345.678/0001-90'}</span>
+                  <span className="font-semibold text-slate-900">{invoice.recipient?.cnpj || getStoredCompanySettings().cnpj}</span>
                 </div>
               </div>
             </div>

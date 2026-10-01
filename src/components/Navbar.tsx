@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   LayoutDashboard,
   FileInput,
@@ -6,18 +6,31 @@ import {
   FileText,
   FileBarChart,
   RotateCcw,
-  Sparkles,
   ShieldCheck,
   Tag,
   Clock,
-  CreditCard
+  Banknote,
+  Building2,
+  ChevronDown,
+  Sparkles
 } from 'lucide-react';
+import { CompanySettings } from '../utils/companySettings';
 
 interface NavbarProps {
-  currentTab: 'dashboard' | 'entry' | 'stock' | 'prices' | 'timeclock' | 'invoices' | 'reports' | 'os_simulation';
-  onSelectTab: (tab: 'dashboard' | 'entry' | 'stock' | 'prices' | 'timeclock' | 'invoices' | 'reports' | 'os_simulation') => void;
+  currentTab: 'dashboard' | 'entry' | 'stock' | 'prices' | 'timeclock' | 'advances' | 'invoices' | 'reports';
+  onSelectTab: (tab: 'dashboard' | 'entry' | 'stock' | 'prices' | 'timeclock' | 'advances' | 'invoices' | 'reports') => void;
   onResetDemo: () => void;
   lowStockAlertsCount: number;
+  companySettings: CompanySettings;
+  onOpenCompanySettings: () => void;
+}
+
+interface NavItem {
+  id: 'dashboard' | 'entry' | 'stock' | 'prices' | 'timeclock' | 'advances' | 'invoices' | 'reports';
+  label: string;
+  icon: React.ElementType;
+  badge?: number;
+  accent?: boolean;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -25,223 +38,181 @@ export const Navbar: React.FC<NavbarProps> = ({
   onSelectTab,
   onResetDemo,
   lowStockAlertsCount,
+  companySettings,
+  onOpenCompanySettings,
 }) => {
-  return (
-    <header className="sticky top-0 z-40 bg-white border-b border-slate-200 shadow-2xs print:hidden">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16 gap-4">
-          {/* Brand Logo & Title */}
-          <div
-            onClick={() => onSelectTab('dashboard')}
-            className="flex items-center gap-3 cursor-pointer select-none shrink-0"
-          >
-            <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-md shadow-indigo-600/20">
-              <Boxes className="w-6 h-6" />
-            </div>
-            <div>
-              <div className="flex items-center gap-1.5">
-                <span className="font-extrabold text-base tracking-tight text-slate-900">
-                  Gestor NF-e
-                </span>
-                <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">
-                  Estoque
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-500 font-medium -mt-0.5">
-                Entradas & Relatórios Mensais
-              </p>
-            </div>
-          </div>
+  const [logoLoadError, setLogoLoadError] = useState(false);
 
-          {/* Navigation Tabs (Desktop) */}
-          <nav className="hidden md:flex items-center gap-1">
+  const navItems: NavItem[] = [
+    { id: 'dashboard', label: 'Painel', icon: LayoutDashboard },
+    { id: 'entry', label: 'Entrada NF-e', icon: FileInput },
+    {
+      id: 'stock',
+      label: 'Estoque',
+      icon: Boxes,
+      badge: lowStockAlertsCount > 0 ? lowStockAlertsCount : undefined
+    },
+    { id: 'prices', label: 'Preços', icon: Tag },
+    { id: 'timeclock', label: 'Ponto', icon: Clock },
+    { id: 'advances', label: 'Vales', icon: Banknote, accent: true },
+    { id: 'invoices', label: 'Notas', icon: FileText },
+    { id: 'reports', label: 'Relatórios', icon: FileBarChart },
+  ];
+
+  return (
+    <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200/80 shadow-xs print:hidden">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex items-center justify-between h-16 gap-3">
+          
+          {/* Zone 1: Company Logo & Brand Lockup */}
+          <div className="flex items-center gap-3 shrink-0">
             <button
               onClick={() => onSelectTab('dashboard')}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
-                currentTab === 'dashboard'
-                  ? 'bg-indigo-50 text-indigo-700 font-bold'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-              }`}
+              title="Ir para o Painel Geral"
+              className="flex items-center gap-2.5 text-left group transition-transform active:scale-98"
             >
-              <LayoutDashboard className="w-4 h-4" />
-              Painel Geral
+              {/* Logo Box with styled container & fallback */}
+              <div className="relative w-10 h-10 rounded-xl bg-white border border-slate-200/90 shadow-xs flex items-center justify-center overflow-hidden p-1 group-hover:border-indigo-400 group-hover:shadow-sm transition-all">
+                {!logoLoadError && companySettings.logoUrl ? (
+                  <img
+                    src={companySettings.logoUrl}
+                    alt={companySettings.tradeName || companySettings.name}
+                    referrerPolicy="no-referrer"
+                    onError={() => setLogoLoadError(true)}
+                    className="w-full h-full object-contain transition-transform group-hover:scale-105"
+                  />
+                ) : (
+                  <div className="w-full h-full rounded-lg bg-indigo-600 flex items-center justify-center text-white font-black text-sm">
+                    {companySettings.tradeName?.charAt(0) || 'G'}
+                  </div>
+                )}
+              </div>
+
+              {/* Company & System Title */}
+              <div className="hidden sm:block">
+                <div className="flex items-center gap-1.5 leading-none">
+                  <span className="font-extrabold text-sm sm:text-base tracking-tight text-slate-900 group-hover:text-indigo-600 transition-colors">
+                    {companySettings.tradeName || 'Gestor NF-e'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 mt-1 text-[11px] text-slate-500 font-medium">
+                  <span className="truncate max-w-[170px] xl:max-w-[220px]">
+                    {companySettings.name}
+                  </span>
+                  <span aria-hidden="true" className="text-slate-300">·</span>
+                  <span className="text-[10px] font-mono text-slate-400 shrink-0">
+                    {companySettings.cnpj}
+                  </span>
+                </div>
+              </div>
             </button>
 
+            {/* Quick Button to edit Company / Logo */}
             <button
-              onClick={() => onSelectTab('entry')}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
-                currentTab === 'entry'
-                  ? 'bg-indigo-50 text-indigo-700 font-bold'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-              }`}
+              onClick={onOpenCompanySettings}
+              title="Personalizar Logotipo e Informações da Empresa"
+              className="hidden lg:flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-slate-600 hover:text-indigo-700 hover:bg-indigo-50/80 rounded-md border border-slate-200 hover:border-indigo-200 transition-all cursor-pointer"
             >
-              <FileInput className="w-4 h-4" />
-              Entrada de NF-e
+              <Building2 className="w-3 h-3 text-indigo-600" />
+              <span>Logo & Empresa</span>
             </button>
+          </div>
 
-            <button
-              onClick={() => onSelectTab('stock')}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all relative ${
-                currentTab === 'stock'
-                  ? 'bg-indigo-50 text-indigo-700 font-bold'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-              }`}
-            >
-              <Boxes className="w-4 h-4" />
-              Estoque
-              {lowStockAlertsCount > 0 && (
-                <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-              )}
-            </button>
-
-            <button
-              onClick={() => onSelectTab('prices')}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
-                currentTab === 'prices'
-                  ? 'bg-indigo-50 text-indigo-700 font-bold'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-              }`}
-            >
-              <Tag className="w-4 h-4" />
-              Consulta de Preços
-            </button>
-
-            <button
-              onClick={() => onSelectTab('timeclock')}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
-                currentTab === 'timeclock'
-                  ? 'bg-indigo-50 text-indigo-700 font-bold'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-              }`}
-            >
-              <Clock className="w-4 h-4" />
-              Controle de Ponto
-            </button>
-
-            <button
-              onClick={() => onSelectTab('invoices')}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
-                currentTab === 'invoices'
-                  ? 'bg-indigo-50 text-indigo-700 font-bold'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-              }`}
-            >
-              <FileText className="w-4 h-4" />
-              Notas Fiscais
-            </button>
-
-            <button
-              onClick={() => onSelectTab('reports')}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
-                currentTab === 'reports'
-                  ? 'bg-indigo-50 text-indigo-700 font-bold'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-              }`}
-            >
-              <FileBarChart className="w-4 h-4" />
-              Relatórios Mensais
-            </button>
-
-            <button
-              onClick={() => onSelectTab('os_simulation')}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
-                currentTab === 'os_simulation'
-                  ? 'bg-indigo-50 text-indigo-700 font-bold'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-              }`}
-            >
-              <CreditCard className="w-4 h-4" />
-              Simulação de OS Cartão
-            </button>
+          {/* Zone 2: Navigation Links (Clean Segmented Tabs) */}
+          <nav className="hidden lg:flex items-center gap-1 bg-slate-100/80 p-1 rounded-xl border border-slate-200/60">
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              const isActive = currentTab === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => onSelectTab(item.id)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
+                    isActive
+                      ? 'bg-white text-indigo-900 shadow-xs border border-slate-200/60 font-bold'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                  }`}
+                >
+                  <Icon
+                    className={`w-3.5 h-3.5 ${
+                      isActive
+                        ? 'text-indigo-600'
+                        : item.accent
+                        ? 'text-emerald-600'
+                        : 'text-slate-400'
+                    }`}
+                  />
+                  <span>{item.label}</span>
+                  {item.badge !== undefined && (
+                    <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold bg-amber-500 text-white">
+                      {item.badge}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </nav>
 
-          {/* Right Actions */}
-          <div className="flex items-center gap-2">
+          {/* Zone 3: Actions (Demo Reset & SEFAZ Status) */}
+          <div className="flex items-center gap-2 shrink-0">
+            {/* Mobile / Tablet Logo Settings Icon */}
+            <button
+              onClick={onOpenCompanySettings}
+              title="Personalizar Logotipo da Empresa"
+              className="lg:hidden p-2 text-slate-600 hover:text-indigo-600 hover:bg-slate-100 rounded-lg transition-colors"
+            >
+              <Building2 className="w-4 h-4 text-indigo-600" />
+            </button>
+
             <button
               onClick={onResetDemo}
               title="Restaurar dados de exemplo do sistema"
-              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
             >
               <RotateCcw className="w-3.5 h-3.5" />
-              <span className="hidden lg:inline text-[11px]">Recarregar Dados Demo</span>
+              <span className="hidden xl:inline text-[11px]">Dados Demo</span>
             </button>
 
             <div className="h-4 w-px bg-slate-200 hidden sm:block" />
 
-            <div className="hidden sm:flex items-center gap-1 text-[11px] text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200 font-medium">
-              <ShieldCheck className="w-3.5 h-3.5" />
-              SEFAZ v4.00
+            <div className="hidden sm:flex items-center gap-1.5 text-[11px] text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-md border border-emerald-200 font-semibold font-mono">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+              <span>SEFAZ 4.00</span>
             </div>
           </div>
         </div>
 
-        {/* Mobile Navigation Tabs */}
-        <div className="md:hidden flex items-center justify-between overflow-x-auto py-2 border-t border-slate-100 gap-1 text-xs">
-          <button
-            onClick={() => onSelectTab('dashboard')}
-            className={`px-3 py-1.5 rounded-lg whitespace-nowrap font-medium ${
-              currentTab === 'dashboard' ? 'bg-indigo-600 text-white' : 'text-slate-600'
-            }`}
-          >
-            Painel
-          </button>
-          <button
-            onClick={() => onSelectTab('entry')}
-            className={`px-3 py-1.5 rounded-lg whitespace-nowrap font-medium ${
-              currentTab === 'entry' ? 'bg-indigo-600 text-white' : 'text-slate-600'
-            }`}
-          >
-            Entrada NF-e
-          </button>
-          <button
-            onClick={() => onSelectTab('stock')}
-            className={`px-3 py-1.5 rounded-lg whitespace-nowrap font-medium ${
-              currentTab === 'stock' ? 'bg-indigo-600 text-white' : 'text-slate-600'
-            }`}
-          >
-            Estoque
-          </button>
-          <button
-            onClick={() => onSelectTab('prices')}
-            className={`px-3 py-1.5 rounded-lg whitespace-nowrap font-medium ${
-              currentTab === 'prices' ? 'bg-indigo-600 text-white' : 'text-slate-600'
-            }`}
-          >
-            Preços
-          </button>
-          <button
-            onClick={() => onSelectTab('timeclock')}
-            className={`px-3 py-1.5 rounded-lg whitespace-nowrap font-medium ${
-              currentTab === 'timeclock' ? 'bg-indigo-600 text-white' : 'text-slate-600'
-            }`}
-          >
-            Ponto
-          </button>
-          <button
-            onClick={() => onSelectTab('invoices')}
-            className={`px-3 py-1.5 rounded-lg whitespace-nowrap font-medium ${
-              currentTab === 'invoices' ? 'bg-indigo-600 text-white' : 'text-slate-600'
-            }`}
-          >
-            Notas
-          </button>
-          <button
-            onClick={() => onSelectTab('reports')}
-            className={`px-3 py-1.5 rounded-lg whitespace-nowrap font-medium ${
-              currentTab === 'reports' ? 'bg-indigo-600 text-white' : 'text-slate-600'
-            }`}
-          >
-            Relatórios
-          </button>
-          <button
-            onClick={() => onSelectTab('os_simulation')}
-            className={`px-3 py-1.5 rounded-lg whitespace-nowrap font-medium ${
-              currentTab === 'os_simulation' ? 'bg-indigo-600 text-white' : 'text-slate-600'
-            }`}
-          >
-            Simulação OS Cartão
-          </button>
+        {/* Mobile & Tablet Navigation Tabs (Horizontal Scroll with snap) */}
+        <div className="lg:hidden flex items-center gap-1.5 overflow-x-auto py-2 border-t border-slate-100 scrollbar-none text-xs">
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            const isActive = currentTab === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => onSelectTab(item.id)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg whitespace-nowrap text-xs font-medium shrink-0 transition-colors cursor-pointer ${
+                  isActive
+                    ? 'bg-indigo-600 text-white font-semibold shadow-xs'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200/70'
+                }`}
+              >
+                <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-white' : 'text-slate-500'}`} />
+                <span>{item.label}</span>
+                {item.badge !== undefined && (
+                  <span
+                    className={`px-1 rounded-full text-[9px] font-mono ${
+                      isActive ? 'bg-white text-indigo-700' : 'bg-amber-500 text-white'
+                    }`}
+                  >
+                    {item.badge}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
+
       </div>
     </header>
   );

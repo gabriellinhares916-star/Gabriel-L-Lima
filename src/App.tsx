@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Product, Invoice, StockMovement, MovementType, Employee, TimePunch, PunchType } from './types';
+import { Product, Invoice, StockMovement, MovementType, Employee, TimePunch, PunchType, SalaryAdvance } from './types';
 import {
   getStoredProducts,
   saveStoredProducts,
@@ -17,8 +17,17 @@ import {
   registerTimePunch,
   updateDayPunches,
   deleteEmployeePunchesForDate,
-  updateEmployee
+  updateEmployee,
+  deleteStoredEmployee
 } from './utils/timeClockStorage';
+import {
+  getStoredSalaryAdvances,
+  addSalaryAdvance,
+  updateSalaryAdvance,
+  deleteSalaryAdvance,
+  resetSalaryAdvancesDemo
+} from './utils/salaryAdvancesStorage';
+import { CompanySettings, getStoredCompanySettings } from './utils/companySettings';
 import { Navbar } from './components/Navbar';
 import { Dashboard } from './components/Dashboard';
 import { InvoiceEntry } from './components/InvoiceEntry';
@@ -27,16 +36,20 @@ import { InvoicesList } from './components/InvoicesList';
 import { MonthlyReportView } from './components/MonthlyReportView';
 import { PriceConsultationView } from './components/PriceConsultationView';
 import { TimeClockDashboard } from './components/TimeClockDashboard';
-import { OSSimulationView } from './components/OSSimulationView';
+import { SalaryAdvancesView } from './components/SalaryAdvancesView';
 import { DanfeModal } from './components/DanfeModal';
+import { CompanySettingsModal } from './components/CompanySettingsModal';
 
 export default function App() {
-  const [currentTab, setCurrentTab] = useState<'dashboard' | 'entry' | 'stock' | 'prices' | 'timeclock' | 'invoices' | 'reports' | 'os_simulation'>('dashboard');
+  const [currentTab, setCurrentTab] = useState<'dashboard' | 'entry' | 'stock' | 'prices' | 'timeclock' | 'advances' | 'invoices' | 'reports'>('dashboard');
   const [products, setProducts] = useState<Product[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [movements, setMovements] = useState<StockMovement[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [punches, setPunches] = useState<TimePunch[]>([]);
+  const [advances, setAdvances] = useState<SalaryAdvance[]>([]);
+  const [companySettings, setCompanySettings] = useState<CompanySettings>(getStoredCompanySettings);
+  const [isCompanySettingsModalOpen, setIsCompanySettingsModalOpen] = useState<boolean>(false);
   const [activeDanfeInvoice, setActiveDanfeInvoice] = useState<Invoice | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -47,6 +60,8 @@ export default function App() {
     setMovements(getStoredMovements());
     setEmployees(getStoredEmployees());
     setPunches(getStoredPunches());
+    setAdvances(getStoredSalaryAdvances());
+    setCompanySettings(getStoredCompanySettings());
   }, []);
 
   const showToast = (message: string) => {
@@ -110,12 +125,52 @@ export default function App() {
     showToast(`Colaborador ${newEmp.name} cadastrado com sucesso!`);
   };
 
+  // Excluir colaborador e suas batidas vinculadas
+  const handleDeleteEmployee = (employeeId: string) => {
+    const empToDelete = employees.find(e => e.id === employeeId);
+    const res = deleteStoredEmployee(employeeId);
+    if (res.success) {
+      setEmployees(res.employees);
+      setPunches(res.punches);
+      showToast(`Colaborador ${empToDelete?.name || ''} excluído com sucesso do controle de ponto.`);
+    } else if (res.error) {
+      alert(res.error);
+    }
+  };
+
   // Atualizar dados e jornada de um colaborador
   const handleUpdateEmployee = (updatedEmp: Employee) => {
     const res = updateEmployee(updatedEmp);
     if (res.success) {
       setEmployees(res.employees);
       showToast(`Cadastro e horários de ${updatedEmp.name} atualizados com sucesso!`);
+    }
+  };
+
+  // Cadastrar novo vale / adiantamento salarial
+  const handleAddSalaryAdvance = (advanceData: Omit<SalaryAdvance, 'id' | 'createdAt'>) => {
+    const res = addSalaryAdvance(advanceData);
+    if (res.success) {
+      setAdvances(res.advances);
+      showToast(`Vale de R$ ${res.advance.amount.toFixed(2).replace('.', ',')} para ${res.advance.employeeName} registrado com sucesso!`);
+    }
+  };
+
+  // Atualizar vale / adiantamento
+  const handleUpdateSalaryAdvance = (updatedAdvance: SalaryAdvance) => {
+    const res = updateSalaryAdvance(updatedAdvance);
+    if (res.success) {
+      setAdvances(res.advances);
+      showToast(`Vale de ${updatedAdvance.employeeName} atualizado com sucesso!`);
+    }
+  };
+
+  // Excluir vale / adiantamento
+  const handleDeleteSalaryAdvance = (id: string) => {
+    const res = deleteSalaryAdvance(id);
+    if (res.success) {
+      setAdvances(res.advances);
+      showToast('Vale excluído com sucesso.');
     }
   };
 
@@ -186,15 +241,17 @@ export default function App() {
 
   // Resetar para dados de demonstração
   const handleResetDemo = () => {
-    if (window.confirm('Deseja recarregar os dados de exemplo do sistema? Isto restaurará os produtos, notas, movimentações e pontos padrão.')) {
+    if (window.confirm('Deseja recarregar os dados de exemplo do sistema? Isto restaurará os produtos, notas, movimentações, pontos e vales padrão.')) {
       const demo = resetDemoDatabase();
       localStorage.removeItem('nfe_stock_employees_v1');
       localStorage.removeItem('nfe_stock_punches_v1');
+      localStorage.removeItem('nfe_stock_salary_advances_v1');
       setProducts(demo.products);
       setInvoices(demo.invoices);
       setMovements(demo.movements);
       setEmployees(getStoredEmployees());
       setPunches(getStoredPunches());
+      setAdvances(resetSalaryAdvancesDemo());
       showToast('Dados de demonstração restaurados com sucesso!');
     }
   };
@@ -217,6 +274,8 @@ export default function App() {
         onSelectTab={setCurrentTab}
         onResetDemo={handleResetDemo}
         lowStockAlertsCount={lowStockCount}
+        companySettings={companySettings}
+        onOpenCompanySettings={() => setIsCompanySettingsModalOpen(true)}
       />
 
       {/* Main Content View */}
@@ -226,8 +285,10 @@ export default function App() {
             products={products}
             movements={movements}
             invoices={invoices}
+            companySettings={companySettings}
             onNavigate={setCurrentTab}
             onOpenDanfe={(inv) => setActiveDanfeInvoice(inv)}
+            onOpenCompanySettings={() => setIsCompanySettingsModalOpen(true)}
           />
         )}
 
@@ -266,8 +327,20 @@ export default function App() {
             onRegisterPunch={handleRegisterPunch}
             onAddNewEmployee={handleAddNewEmployee}
             onUpdateEmployee={handleUpdateEmployee}
+            onDeleteEmployee={handleDeleteEmployee}
             onUpdateDayPunches={handleUpdateDayPunches}
             onClearDayPunches={handleClearDayPunches}
+          />
+        )}
+
+        {currentTab === 'advances' && (
+          <SalaryAdvancesView
+            employees={employees}
+            advances={advances}
+            companySettings={companySettings}
+            onAddAdvance={handleAddSalaryAdvance}
+            onUpdateAdvance={handleUpdateSalaryAdvance}
+            onDeleteAdvance={handleDeleteSalaryAdvance}
           />
         )}
 
@@ -285,10 +358,6 @@ export default function App() {
             invoices={invoices}
           />
         )}
-
-        {currentTab === 'os_simulation' && (
-          <OSSimulationView />
-        )}
       </main>
 
       {/* DANFE Global Modal */}
@@ -299,11 +368,30 @@ export default function App() {
         />
       )}
 
-      {/* Footer */}
-      <footer className="bg-white border-t border-slate-200 py-4 text-center text-xs text-slate-400 print:hidden">
-        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
-          <span>Gestor NF-e & Controle de Estoque • SEFAZ NF-e Layout 4.00</span>
-          <span>Cálculo Automático de Custo Médio Ponderado Móvel (CMPM)</span>
+      {/* Modal de Configurações da Empresa & Logotipo */}
+      <CompanySettingsModal
+        isOpen={isCompanySettingsModalOpen}
+        onClose={() => setIsCompanySettingsModalOpen(false)}
+        currentSettings={companySettings}
+        onSave={(updated) => {
+          setCompanySettings(updated);
+          showToast('Logotipo e dados da empresa atualizados com sucesso!');
+        }}
+      />
+
+      {/* Footer Profissional */}
+      <footer className="bg-white border-t border-slate-200/90 py-4 text-xs text-slate-500 print:hidden mt-auto">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <span className="font-bold text-slate-800">{companySettings.tradeName || 'Gestor NF-e & Estoque'}</span>
+            <span className="text-slate-300">·</span>
+            <span className="text-slate-500 font-mono">{companySettings.cnpj}</span>
+          </div>
+          <div className="flex items-center gap-3 text-slate-400 font-mono text-[11px]">
+            <span>SEFAZ NF-e Layout 4.00</span>
+            <span className="text-slate-300">·</span>
+            <span>Custo Médio Ponderado Móvel (CMPM)</span>
+          </div>
         </div>
       </footer>
     </div>

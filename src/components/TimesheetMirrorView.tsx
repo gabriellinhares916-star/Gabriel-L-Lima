@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Employee, TimePunch, MonthlyTimeSheetSummary, DailyTimeSheet } from '../types';
+import { CompanySettings, getStoredCompanySettings } from '../utils/companySettings';
 import {
   calculateEmployeeMonthlyTimesheet,
   exportIndividualTimesheetCSV
@@ -51,6 +52,8 @@ export const TimesheetMirrorView: React.FC<TimesheetMirrorViewProps> = ({
   onUpdateDayPunches,
   onClearDayPunches,
 }) => {
+  const companySettings = useMemo(() => getStoredCompanySettings(), []);
+  const [logoError, setLogoError] = useState(false);
   const [currentMonthStr, setCurrentMonthStr] = useState<string>('2026-09');
   const [editingDay, setEditingDay] = useState<DailyTimeSheet | null>(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState<boolean>(false);
@@ -94,8 +97,18 @@ export const TimesheetMirrorView: React.FC<TimesheetMirrorViewProps> = ({
 
   if (!currentEmployee || !summary) {
     return (
-      <div className="p-8 text-center bg-white rounded-2xl border border-slate-200">
-        <p className="text-sm text-slate-500">Nenhum funcionário selecionado.</p>
+      <div className="bg-white rounded-2xl border-2 border-dashed border-slate-300 p-12 text-center space-y-4">
+        <div className="w-16 h-16 rounded-2xl bg-indigo-50 text-indigo-600 mx-auto flex items-center justify-center">
+          <Calendar className="w-8 h-8" />
+        </div>
+        <div className="max-w-md mx-auto space-y-1">
+          <h3 className="text-base font-bold text-slate-900">
+            Nenhum colaborador disponível para espelho de ponto
+          </h3>
+          <p className="text-xs text-slate-500 leading-relaxed">
+            Cadastre colaboradores na aba "Colaboradores & Equipe" ou utilize o botão no topo para apurar o espelho mensal e banco de horas.
+          </p>
+        </div>
       </div>
     );
   }
@@ -180,24 +193,38 @@ export const TimesheetMirrorView: React.FC<TimesheetMirrorViewProps> = ({
       {/* Cabeçalho Formal para Impressão / Visualização do Espelho (Portaria 671 MTE) */}
       <div className="bg-white p-6 sm:p-8 rounded-2xl border border-slate-200 shadow-2xs space-y-6">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between pb-6 border-b border-slate-200 gap-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-extrabold tracking-wider uppercase px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">
-                Portaria 671 / MTE
-              </span>
-              <span className="text-xs text-slate-500 font-medium">REP-P Eletrônico</span>
+          <div className="flex items-center gap-3.5">
+            {companySettings?.logoUrl && !logoError ? (
+              <div className="w-14 h-14 rounded-xl border border-slate-200 p-1 flex items-center justify-center bg-white shrink-0">
+                <img
+                  src={companySettings.logoUrl}
+                  alt={companySettings.tradeName}
+                  referrerPolicy="no-referrer"
+                  onError={() => setLogoError(true)}
+                  className="w-full h-full object-contain"
+                />
+              </div>
+            ) : null}
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-extrabold tracking-wider uppercase px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">
+                  Portaria 671 / MTE
+                </span>
+                <span className="text-xs text-slate-500 font-medium">REP-P Eletrônico</span>
+              </div>
+              <h1 className="text-xl sm:text-2xl font-black text-slate-900 mt-1">
+                Espelho de Ponto Individual
+              </h1>
+              <p className="text-xs text-slate-500">
+                Registro diário de jornada de trabalho, intervalos intrajornada e apuração de banco de horas.
+              </p>
             </div>
-            <h1 className="text-xl sm:text-2xl font-black text-slate-900 mt-1">
-              Espelho de Ponto Individual
-            </h1>
-            <p className="text-xs text-slate-500">
-              Registro diário de jornada de trabalho, intervalos intrajornada e apuração de banco de horas.
-            </p>
           </div>
 
           <div className="text-left sm:text-right text-xs text-slate-600 space-y-0.5 bg-slate-50 sm:bg-transparent p-3 sm:p-0 rounded-xl sm:rounded-none w-full sm:w-auto">
-            <div><strong>Empresa:</strong> Distribuidora & Logística de Mercadorias Ltda.</div>
-            <div><strong>CNPJ:</strong> 12.345.678/0001-90</div>
+            <div><strong>Empresa:</strong> {companySettings.name}</div>
+            <div><strong>CNPJ:</strong> {companySettings.cnpj}</div>
+            {companySettings.cityState && <div><strong>Local:</strong> {companySettings.cityState}</div>}
             <div><strong>Competência:</strong> {currentMonthStr}</div>
           </div>
         </div>

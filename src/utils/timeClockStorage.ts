@@ -457,6 +457,43 @@ export function updateEmployee(updatedEmployee: Employee): {
 }
 
 /**
+ * Exclui um colaborador do sistema de controle de ponto e remove suas batidas vinculadas
+ */
+export function deleteStoredEmployee(employeeId: string): {
+  success: boolean;
+  employees: Employee[];
+  punches: TimePunch[];
+  deletedEmployee?: Employee;
+  error?: string;
+} {
+  const employees = getStoredEmployees();
+  const punches = getStoredPunches();
+
+  const employeeToDelete = employees.find(e => e.id === employeeId);
+  if (!employeeToDelete) {
+    return {
+      success: false,
+      employees,
+      punches,
+      error: 'Colaborador não encontrado para exclusão.'
+    };
+  }
+
+  const updatedEmployees = employees.filter(e => e.id !== employeeId);
+  const updatedPunches = punches.filter(p => p.employeeId !== employeeId);
+
+  saveStoredEmployees(updatedEmployees);
+  saveStoredPunches(updatedPunches);
+
+  return {
+    success: true,
+    employees: updatedEmployees,
+    punches: updatedPunches,
+    deletedEmployee: employeeToDelete,
+  };
+}
+
+/**
  * Helper: converte string "HH:mm" em minutos
  */
 function timeToMinutes(timeStr?: string): number {

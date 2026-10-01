@@ -1,6 +1,6 @@
 {
   "name": "Gestor NF-e & Estoque",
-  "description": "Sistema completo para entrada de notas fiscais eletrônicas, controle de estoque com custo médio, relatórios de movimentação, controle de ponto e simulação de OS para cartão com diluição proporcional.",
+  "description": "Sistema completo para entrada de notas fiscais eletrônicas, controle de estoque com custo médio, relatórios de movimentação, controle de ponto e adiantamentos salariais (vales).",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

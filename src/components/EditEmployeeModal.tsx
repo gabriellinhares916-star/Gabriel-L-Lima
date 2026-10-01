@@ -9,7 +9,9 @@ import {
   X,
   Save,
   CheckCircle2,
-  Calendar
+  Calendar,
+  Trash2,
+  AlertTriangle
 } from 'lucide-react';
 
 interface EditEmployeeModalProps {
@@ -17,6 +19,7 @@ interface EditEmployeeModalProps {
   onClose: () => void;
   employee: Employee;
   onSave: (updated: Employee) => void;
+  onDelete?: (employeeId: string) => void;
 }
 
 export const EditEmployeeModal: React.FC<EditEmployeeModalProps> = ({
@@ -24,7 +27,9 @@ export const EditEmployeeModal: React.FC<EditEmployeeModalProps> = ({
   onClose,
   employee,
   onSave,
+  onDelete,
 }) => {
+  const [confirmDelete, setConfirmDelete] = useState<boolean>(false);
   const [name, setName] = useState<string>(employee.name);
   const [registrationNumber, setRegistrationNumber] = useState<string>(employee.registrationNumber);
   const [cpf, setCpf] = useState<string>(employee.cpf);
@@ -302,22 +307,72 @@ export const EditEmployeeModal: React.FC<EditEmployeeModalProps> = ({
             </div>
           </div>
 
+          {/* Confirmação de Exclusão */}
+          {confirmDelete && (
+            <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl space-y-2">
+              <div className="flex items-center gap-2 text-rose-800 font-bold text-xs">
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>Confirmar exclusão definitiva do colaborador?</span>
+              </div>
+              <p className="text-[11px] text-rose-700 leading-relaxed">
+                Esta ação removerá o cadastro de <strong>{employee.name}</strong> e apagará todas as suas batidas de ponto e histórico de banco de horas vinculados.
+              </p>
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setConfirmDelete(false)}
+                  className="px-3 py-1.5 bg-white border border-rose-300 text-slate-700 rounded-lg text-xs font-semibold hover:bg-slate-50 cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (onDelete) {
+                      onDelete(employee.id);
+                    }
+                    onClose();
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Sim, Excluir Colaborador</span>
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Botões */}
-          <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 border border-slate-300 text-slate-700 rounded-xl hover:bg-slate-50 font-bold transition-colors cursor-pointer"
-            >
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              className="flex items-center gap-1.5 px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold shadow-xs transition-all cursor-pointer"
-            >
-              <Save className="w-4 h-4" />
-              <span>Salvar Alterações</span>
-            </button>
+          <div className="flex items-center justify-between gap-2 pt-3 border-t border-slate-200">
+            {onDelete && !confirmDelete ? (
+              <button
+                type="button"
+                onClick={() => setConfirmDelete(true)}
+                className="flex items-center gap-1.5 px-3 py-2 text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-xl font-bold text-xs transition-colors cursor-pointer"
+              >
+                <Trash2 className="w-4 h-4 text-rose-500" />
+                <span>Excluir Colaborador</span>
+              </button>
+            ) : (
+              <div />
+            )}
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 border border-slate-300 text-slate-700 rounded-xl hover:bg-slate-50 font-bold transition-colors cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                className="flex items-center gap-1.5 px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold shadow-xs transition-all cursor-pointer"
+              >
+                <Save className="w-4 h-4" />
+                <span>Salvar Alterações</span>
+              </button>
+            </div>
           </div>
         </form>
       </div>

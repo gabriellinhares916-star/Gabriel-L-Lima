@@ -283,3 +283,39 @@ export interface OSSimulationResult {
   simulatedServices: OSItem[];
 }
 
+// ==========================================
+// Módulo de Vales & Adiantamentos Salariais
+// ==========================================
+
+export type AdvancePaymentMethod = 'DINHEIRO' | 'PIX' | 'TRANSFERENCIA' | 'CHEQUE' | 'OUTRO';
+export type AdvanceCategory =
+  | 'ADIANTAMENTO_SALARIAL'
+  | 'VALE_EMERGENCIAL'
+  | 'VALE_ALIMENTACAO_EXTRA'
+  | 'VALE_TRANSPORTE_EXTRA'
+  | 'AJUDA_DE_CUSTO'
+  | 'OUTRO';
+export type AdvanceStatus = 'PENDENTE_DESCONTO' | 'DESCONTADO_FOLHA' | 'CANCELADO';
+
+export interface SalaryAdvance {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  employeeRegistration: string;
+  employeeRole: string;
+  employeeDepartment: string;
+  date: string; // YYYY-MM-DD (data da entrega do adiantamento)
+  competenceMonth: string; // YYYY-MM (mês de referência para desconto em folha)
+  amount: number; // Valor em reais R$
+  paymentMethod: AdvancePaymentMethod; // Dinheiro em espécie, Pix, etc.
+  category: AdvanceCategory;
+  reason: string; // Motivo ou descrição
+  status: AdvanceStatus; // Pendente ou Já Descontado
+  approvedBy?: string; // Responsável pela liberação do dinheiro
+  receiptSigned?: boolean; // Se assinou recibo físico
+  notes?: string;
+  createdAt: string; // ISO
+  updatedAt?: string;
+}
+
+

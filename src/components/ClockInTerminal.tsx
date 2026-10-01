@@ -54,6 +54,31 @@ export const ClockInTerminal: React.FC<ClockInTerminalProps> = ({
     return () => clearInterval(timer);
   }, []);
 
+  // Garantir que o colaborador selecionado seja mantido em sincronia após exclusões/atualizações
+  useEffect(() => {
+    if (!employees.some(e => e.id === selectedEmployeeId)) {
+      setSelectedEmployeeId(employees[0]?.id || '');
+    }
+  }, [employees, selectedEmployeeId]);
+
+  if (employees.length === 0) {
+    return (
+      <div className="bg-white rounded-2xl border-2 border-dashed border-slate-300 p-12 text-center space-y-4">
+        <div className="w-16 h-16 rounded-2xl bg-indigo-50 text-indigo-600 mx-auto flex items-center justify-center">
+          <Clock className="w-8 h-8" />
+        </div>
+        <div className="max-w-md mx-auto space-y-1">
+          <h3 className="text-base font-bold text-slate-900">
+            Nenhum colaborador cadastrado
+          </h3>
+          <p className="text-xs text-slate-500 leading-relaxed">
+            Cadastre colaboradores na aba "Colaboradores & Equipe" ou utilize o botão "+ Cadastrar Colaborador" no topo para iniciar os registros de ponto eletrônico.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   const selectedEmployee = employees.find(e => e.id === selectedEmployeeId);
 
   // Batidas de hoje do funcionário selecionado

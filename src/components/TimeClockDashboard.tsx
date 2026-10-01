@@ -13,7 +13,8 @@ import {
   ShieldCheck,
   Building,
   UserCheck,
-  History
+  History,
+  UserPlus
 } from 'lucide-react';
 import { exportConsolidatedTimeClockCSV } from '../utils/timeClockStorage';
 
@@ -29,6 +30,7 @@ interface TimeClockDashboardProps {
   }) => { success: boolean; punch?: TimePunch; error?: string };
   onAddNewEmployee: (employee: Omit<Employee, 'id'>) => void;
   onUpdateEmployee?: (employee: Employee) => void;
+  onDeleteEmployee?: (employeeId: string) => void;
   onUpdateDayPunches?: (params: {
     employeeId: string;
     date: string;
@@ -47,11 +49,20 @@ export const TimeClockDashboard: React.FC<TimeClockDashboardProps> = ({
   onRegisterPunch,
   onAddNewEmployee,
   onUpdateEmployee,
+  onDeleteEmployee,
   onUpdateDayPunches,
   onClearDayPunches,
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<'terminal' | 'mirror' | 'employees'>('terminal');
   const [selectedEmployeeForMirror, setSelectedEmployeeForMirror] = useState<string>(employees[0]?.id || '');
+  const [openAddModalTrigger, setOpenAddModalTrigger] = useState<boolean>(false);
+
+  // Garantir que o colaborador selecionado seja válido mesmo após exclusão
+  React.useEffect(() => {
+    if (!employees.some(e => e.id === selectedEmployeeForMirror)) {
+      setSelectedEmployeeForMirror(employees[0]?.id || '');
+    }
+  }, [employees, selectedEmployeeForMirror]);
 
   const todayStr = new Date().toISOString().substring(0, 10);
   const punchesToday = punches.filter(p => p.date === todayStr);
@@ -88,6 +99,17 @@ export const TimeClockDashboard: React.FC<TimeClockDashboardProps> = ({
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => {
+                setActiveSubTab('employees');
+                setOpenAddModalTrigger(true);
+              }}
+              className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition-all shadow-md cursor-pointer"
+            >
+              <UserPlus className="w-4 h-4" />
+              <span>Cadastrar Colaborador</span>
+            </button>
+
             <button
               onClick={() => exportConsolidatedTimeClockCSV(employees, punches, currentMonthStr)}
               className="flex items-center gap-2 px-4 py-2.5 bg-white/10 hover:bg-white/20 text-white text-xs font-bold rounded-xl transition-all border border-white/10 cursor-pointer"
@@ -241,8 +263,11 @@ export const TimeClockDashboard: React.FC<TimeClockDashboardProps> = ({
             punches={punches}
             onAddNewEmployee={onAddNewEmployee}
             onUpdateEmployee={onUpdateEmployee}
+            onDeleteEmployee={onDeleteEmployee}
             onSelectEmployeeForMirror={handleNavigateToMirrorWithEmployee}
             onSelectEmployeeForPunch={handleNavigateToPunchWithEmployee}
+            isOpenAddModalExternally={openAddModalTrigger}
+            onCloseExternalAddModal={() => setOpenAddModalTrigger(false)}
           />
         )}
       </div>

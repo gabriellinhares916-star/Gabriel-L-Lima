@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Product, StockMovement, Invoice } from '../types';
+import { getStoredCompanySettings } from '../utils/companySettings';
 import { generateMonthlyReport, formatBRL, formatNumberBR, MONTH_NAMES_PT } from '../utils/stockCalculations';
 import {
   exportMonthlyReportProductsCSV,
@@ -41,6 +42,8 @@ export const MonthlyReportView: React.FC<MonthlyReportViewProps> = ({
   const [activeTab, setActiveTab] = useState<'products' | 'suppliers' | 'cfop' | 'top'>('products');
 
   // Gerar relatório automaticamente sempre que os dados ou mês mudarem
+  const companySettings = useMemo(() => getStoredCompanySettings(), []);
+  const [logoError, setLogoError] = useState(false);
   const report = useMemo(() => {
     return generateMonthlyReport(selectedMonth, selectedYear, products, movements, invoices);
   }, [selectedMonth, selectedYear, products, movements, invoices]);
@@ -172,21 +175,40 @@ export const MonthlyReportView: React.FC<MonthlyReportViewProps> = ({
       {/* CABEÇALHO DO RELATÓRIO (Visível na impressão e na tela) */}
       <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs space-y-6">
         {/* Document Title Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-200 gap-2">
-          <div>
-            <div className="text-[11px] uppercase tracking-wider font-bold text-indigo-600">
-              Gestor NF-e & Controle de Estoque
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-200 gap-4">
+          <div className="flex items-center gap-3.5">
+            {companySettings?.logoUrl && !logoError ? (
+              <div className="w-14 h-14 rounded-xl border border-slate-200 p-1 flex items-center justify-center bg-white shrink-0">
+                <img
+                  src={companySettings.logoUrl}
+                  alt={companySettings.tradeName}
+                  referrerPolicy="no-referrer"
+                  onError={() => setLogoError(true)}
+                  className="w-full h-full object-contain"
+                />
+              </div>
+            ) : null}
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] uppercase tracking-wider font-bold text-indigo-600">
+                  {companySettings?.tradeName || 'Gestor NF-e & Controle de Estoque'}
+                </span>
+                <span className="text-slate-300">·</span>
+                <span className="text-[11px] text-slate-500 font-mono">
+                  {companySettings?.cnpj}
+                </span>
+              </div>
+              <h1 className="text-xl font-bold text-slate-900 mt-0.5">
+                Demonstrativo Mensal de Movimentação de Estoque
+              </h1>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Empresa: <strong className="text-slate-800">{companySettings?.name}</strong> • Competência: <strong className="text-slate-800">{report.monthName}</strong> • Emitido em: {new Date().toLocaleDateString('pt-BR')}
+              </p>
             </div>
-            <h1 className="text-xl font-bold text-slate-900 mt-0.5">
-              Demonstrativo Mensal de Movimentação de Estoque
-            </h1>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Competência: <strong className="text-slate-800">{report.monthName}</strong> • Emitido em: {new Date().toLocaleDateString('pt-BR')}
-            </p>
           </div>
 
           <div className="text-left sm:text-right text-xs">
-            <span className="px-2.5 py-1 rounded-full font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 inline-block">
+            <span className="px-2.5 py-1 rounded-full font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 inline-block font-mono">
               {report.totalInvoicesCount} NF-e Processadas
             </span>
           </div>

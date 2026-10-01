@@ -1,94 +1,18 @@
 import { SalaryAdvance, Employee } from '../types';
 
-const STORAGE_KEY = 'nfe_stock_salary_advances_v1';
+const STORAGE_KEY = 'nfe_stock_salary_advances_clean_v1';
 
-export const INITIAL_SALARY_ADVANCES: SalaryAdvance[] = [
-  {
-    id: 'vale-1',
-    employeeId: 'emp-1',
-    employeeName: 'Carlos Eduardo Mendes',
-    employeeRegistration: 'MAT-1001',
-    employeeRole: 'Almoxarife Líder',
-    employeeDepartment: 'Almoxarifado & Estoque',
-    date: '2026-09-15',
-    competenceMonth: '2026-09',
-    amount: 300.0,
-    paymentMethod: 'DINHEIRO',
-    category: 'ADIANTAMENTO_SALARIAL',
-    reason: 'Adiantamento quinzenal padrão solicitado no caixa físico',
-    status: 'PENDENTE_DESCONTO',
-    approvedBy: 'Gerência de Operações',
-    receiptSigned: true,
-    notes: 'Entregue em cédulas no balcão do almoxarifado',
-    createdAt: '2026-09-15T14:30:00.000Z',
-  },
-  {
-    id: 'vale-2',
-    employeeId: 'emp-4',
-    employeeName: 'Beatriz Albuquerque',
-    employeeRegistration: 'MAT-1004',
-    employeeRole: 'Auxiliar de Estoque & Separação',
-    employeeDepartment: 'Expedição & Armazém',
-    date: '2026-09-18',
-    competenceMonth: '2026-09',
-    amount: 150.0,
-    paymentMethod: 'DINHEIRO',
-    category: 'VALE_EMERGENCIAL',
-    reason: 'Vale emergencial para despesas de saúde / farmácia',
-    status: 'PENDENTE_DESCONTO',
-    approvedBy: 'Supervisão de Estoque',
-    receiptSigned: true,
-    notes: 'Recibo assinado e arquivado na pasta de DP',
-    createdAt: '2026-09-18T10:15:00.000Z',
-  },
-  {
-    id: 'vale-3',
-    employeeId: 'emp-3',
-    employeeName: 'Rodrigo Silva Santos',
-    employeeRegistration: 'MAT-1003',
-    employeeRole: 'Operador de Empilhadeira',
-    employeeDepartment: 'Estoque & Logística',
-    date: '2026-09-08',
-    competenceMonth: '2026-09',
-    amount: 250.0,
-    paymentMethod: 'PIX',
-    category: 'ADIANTAMENTO_SALARIAL',
-    reason: 'Adiantamento transferido via Pix chave CPF',
-    status: 'DESCONTADO_FOLHA',
-    approvedBy: 'Financeiro',
-    receiptSigned: true,
-    notes: 'Comprovante bancário anexado à prévia da folha',
-    createdAt: '2026-09-08T16:00:00.000Z',
-  },
-  {
-    id: 'vale-4',
-    employeeId: 'emp-2',
-    employeeName: 'Mariana Souza Lima',
-    employeeRegistration: 'MAT-1002',
-    employeeRole: 'Conferente de NF-e & Entrada',
-    employeeDepartment: 'Recebimento Fiscal',
-    date: '2026-09-22',
-    competenceMonth: '2026-09',
-    amount: 120.0,
-    paymentMethod: 'DINHEIRO',
-    category: 'VALE_TRANSPORTE_EXTRA',
-    reason: 'Ajuda de transporte para plantão de inventário fiscal',
-    status: 'PENDENTE_DESCONTO',
-    approvedBy: 'Coordenação Fiscal',
-    receiptSigned: true,
-    notes: 'Retirada em espécie do fundo de caixa',
-    createdAt: '2026-09-22T09:00:00.000Z',
-  }
-];
+export const INITIAL_SALARY_ADVANCES: SalaryAdvance[] = [];
 
 export function getStoredSalaryAdvances(): SalaryAdvance[] {
   const data = localStorage.getItem(STORAGE_KEY);
   if (!data) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(INITIAL_SALARY_ADVANCES));
-    return INITIAL_SALARY_ADVANCES;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify([]));
+    return [];
   }
   try {
     const parsed = JSON.parse(data);
+    if (!Array.isArray(parsed)) return [];
     // Garantir conversões numéricas para evitar erros de soma
     return parsed.map((item: any) => ({
       ...item,
@@ -96,8 +20,14 @@ export function getStoredSalaryAdvances(): SalaryAdvance[] {
     }));
   } catch (err) {
     console.error('Erro ao ler vales/adiantamentos:', err);
-    return INITIAL_SALARY_ADVANCES;
+    return [];
   }
+}
+
+export function clearAllAdvances(): SalaryAdvance[] {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify([]));
+  localStorage.removeItem('nfe_stock_salary_advances_v1');
+  return [];
 }
 
 export function saveStoredSalaryAdvances(advances: SalaryAdvance[]): void {

@@ -1,87 +1,37 @@
 import { BillingRecord } from '../types';
 
-const STORAGE_KEY = 'lordlub_billing_records_v1';
+const STORAGE_KEY = 'lordlub_billing_records_clean_v1';
 
-// Dados iniciais de demonstração para a LORD LUB
-export const INITIAL_BILLING_RECORDS: BillingRecord[] = [
-  {
-    id: 'bill-1048',
-    date: '2026-09-28',
-    serviceOrderNumber: 'OS-1048',
-    productsTotal: 380.00,
-    alignmentBalancingTotal: 140.00,
-    servicesTotal: 90.00,
-    grandTotal: 610.00,
-    customerName: 'Marcos Vinicius Andrade',
-    vehiclePlate: 'BRA2E19',
-    vehicleModel: 'Toyota Corolla 2.0',
-    paymentMethod: 'PIX',
-    notes: 'Troca de óleo sintético 5W30, filtro de óleo e filtro de ar + alinhamento 3D e higienização.',
-    createdAt: '2026-09-28T10:30:00Z',
-  },
-  {
-    id: 'bill-1049',
-    date: '2026-09-29',
-    serviceOrderNumber: 'OS-1049',
-    productsTotal: 1840.00,
-    alignmentBalancingTotal: 160.00,
-    servicesTotal: 180.00,
-    grandTotal: 2180.00,
-    customerName: 'Transportadora Silva & Filhos',
-    vehiclePlate: 'RLK8F42',
-    vehicleModel: 'Fiat Toro Diesel',
-    paymentMethod: 'CARTAO_CREDITO',
-    notes: '4 Pneus 215/65R16 + Alinhamento e Balanceamento 4 rodas + Troca de pastilhas dianteiras.',
-    createdAt: '2026-09-29T14:15:00Z',
-  },
-  {
-    id: 'bill-1050',
-    date: '2026-09-30',
-    serviceOrderNumber: 'OS-1050',
-    productsTotal: 290.00,
-    alignmentBalancingTotal: 90.00,
-    servicesTotal: 220.00,
-    grandTotal: 600.00,
-    customerName: 'Camila Rodrigues Lima',
-    vehiclePlate: 'QNF3H88',
-    vehicleModel: 'Honda Civic G10',
-    paymentMethod: 'CARTAO_DEBITO',
-    notes: 'Óleo motor 0W20 + aditivo de radiador + alinhamento dianteiro + revisão de suspensão.',
-    createdAt: '2026-09-30T11:40:00Z',
-  },
-  {
-    id: 'bill-1051',
-    date: '2026-09-30',
-    serviceOrderNumber: 'OS-1051',
-    productsTotal: 155.00,
-    alignmentBalancingTotal: 140.00,
-    servicesTotal: 110.00,
-    grandTotal: 405.00,
-    customerName: 'Renato Siqueira Dias',
-    vehiclePlate: 'FGH9J11',
-    vehicleModel: 'Volkswagen Polo TSI',
-    paymentMethod: 'DINHEIRO',
-    notes: 'Palhetas de silicone + filtro de cabine + alinhamento computadorizado e regulagem de freios.',
-    createdAt: '2026-09-30T16:05:00Z',
-  }
-];
+// Base limpa para preenchimento de dados reais a partir de hoje
+export const INITIAL_BILLING_RECORDS: BillingRecord[] = [];
 
 export function getStoredBillings(): BillingRecord[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(INITIAL_BILLING_RECORDS));
-      return INITIAL_BILLING_RECORDS;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify([]));
+      return [];
     }
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
       return parsed;
     }
-    return INITIAL_BILLING_RECORDS;
+    return [];
   } catch (err) {
     console.error('Erro ao ler faturamentos do localStorage:', err);
-    return INITIAL_BILLING_RECORDS;
+    return [];
   }
+}
+
+export function clearAllBillings(): BillingRecord[] {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify([]));
+    localStorage.removeItem('lordlub_billing_records_v1');
+    localStorage.removeItem('lordlub_billing_records_v2');
+  } catch (err) {
+    console.error('Erro ao limpar faturamentos:', err);
+  }
+  return [];
 }
 
 export function saveStoredBillings(records: BillingRecord[]): void {
@@ -95,6 +45,8 @@ export function saveStoredBillings(records: BillingRecord[]): void {
 export function addBillingRecord(data: {
   date: string;
   serviceOrderNumber: string;
+  collaboratorName?: string;
+  collaboratorId?: string;
   productsTotal: number;
   alignmentBalancingTotal: number;
   servicesTotal: number;
@@ -117,6 +69,8 @@ export function addBillingRecord(data: {
     id,
     date: data.date,
     serviceOrderNumber: data.serviceOrderNumber.trim(),
+    collaboratorName: data.collaboratorName?.trim() || undefined,
+    collaboratorId: data.collaboratorId?.trim() || undefined,
     productsTotal: products,
     alignmentBalancingTotal: alignment,
     servicesTotal: services,

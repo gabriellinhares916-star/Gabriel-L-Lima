@@ -2,7 +2,7 @@ import { Employee, TimePunch, PunchType, DailyTimeSheet, MonthlyTimeSheetSummary
 
 const STORAGE_KEYS = {
   EMPLOYEES: 'nfe_stock_employees_v1',
-  TIME_PUNCHES: 'nfe_stock_punches_v1',
+  TIME_PUNCHES: 'nfe_stock_punches_clean_v1',
   LAST_NSR: 'nfe_stock_last_nsr_v1',
 };
 
@@ -195,7 +195,7 @@ function generateSamplePunches(): TimePunch[] {
   return punches;
 }
 
-export const INITIAL_TIME_PUNCHES: TimePunch[] = generateSamplePunches();
+export const INITIAL_TIME_PUNCHES: TimePunch[] = [];
 
 /**
  * Carrega lista de funcionários
@@ -227,15 +227,22 @@ export function saveStoredEmployees(employees: Employee[]): void {
 export function getStoredPunches(): TimePunch[] {
   const data = localStorage.getItem(STORAGE_KEYS.TIME_PUNCHES);
   if (!data) {
-    localStorage.setItem(STORAGE_KEYS.TIME_PUNCHES, JSON.stringify(INITIAL_TIME_PUNCHES));
-    return INITIAL_TIME_PUNCHES;
+    localStorage.setItem(STORAGE_KEYS.TIME_PUNCHES, JSON.stringify([]));
+    return [];
   }
   try {
-    return JSON.parse(data);
+    const parsed = JSON.parse(data);
+    return Array.isArray(parsed) ? parsed : [];
   } catch (err) {
     console.error('Erro ao ler batidas:', err);
-    return INITIAL_TIME_PUNCHES;
+    return [];
   }
+}
+
+export function clearAllPunches(): TimePunch[] {
+  localStorage.setItem(STORAGE_KEYS.TIME_PUNCHES, JSON.stringify([]));
+  localStorage.removeItem('nfe_stock_punches_v1');
+  return [];
 }
 
 /**

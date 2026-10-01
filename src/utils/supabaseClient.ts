@@ -227,6 +227,8 @@ CREATE TABLE IF NOT EXISTS public.billings (
   id TEXT PRIMARY KEY,
   date TEXT NOT NULL,
   service_order_number TEXT NOT NULL,
+  collaborator_name TEXT,
+  collaborator_id TEXT,
   products_total NUMERIC NOT NULL DEFAULT 0,
   alignment_balancing_total NUMERIC NOT NULL DEFAULT 0,
   services_total NUMERIC NOT NULL DEFAULT 0,
@@ -239,6 +241,10 @@ CREATE TABLE IF NOT EXISTS public.billings (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
+
+-- Garante adição das colunas de colaborador se a tabela já tiver sido criada antes
+ALTER TABLE public.billings ADD COLUMN IF NOT EXISTS collaborator_name TEXT;
+ALTER TABLE public.billings ADD COLUMN IF NOT EXISTS collaborator_id TEXT;
 
 -- Habilitar Row Level Security (RLS) com políticas de acesso anônimo/público para o aplicativo
 ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
@@ -286,6 +292,8 @@ CREATE TABLE IF NOT EXISTS public.billings (
   id TEXT PRIMARY KEY,
   date TEXT NOT NULL,
   service_order_number TEXT NOT NULL,
+  collaborator_name TEXT,
+  collaborator_id TEXT,
   products_total NUMERIC NOT NULL DEFAULT 0,
   alignment_balancing_total NUMERIC NOT NULL DEFAULT 0,
   services_total NUMERIC NOT NULL DEFAULT 0,
@@ -298,6 +306,10 @@ CREATE TABLE IF NOT EXISTS public.billings (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
+
+-- Garante suporte às colunas de colaborador mesmo se a tabela já existia antes
+ALTER TABLE public.billings ADD COLUMN IF NOT EXISTS collaborator_name TEXT;
+ALTER TABLE public.billings ADD COLUMN IF NOT EXISTS collaborator_id TEXT;
 
 ALTER TABLE public.billings ENABLE ROW LEVEL SECURITY;
 
@@ -542,6 +554,8 @@ export async function syncBillingsToSupabase(billings: BillingRecord[]): Promise
       id: b.id,
       date: b.date,
       service_order_number: b.serviceOrderNumber,
+      collaborator_name: b.collaboratorName || null,
+      collaborator_id: b.collaboratorId || null,
       products_total: b.productsTotal,
       alignment_balancing_total: b.alignmentBalancingTotal,
       services_total: b.servicesTotal,
@@ -772,6 +786,8 @@ export async function pullFullDatabaseFromSupabase(): Promise<{
       id: row.id,
       date: row.date,
       serviceOrderNumber: row.service_order_number,
+      collaboratorName: row.collaborator_name || undefined,
+      collaboratorId: row.collaborator_id || undefined,
       productsTotal: Number(row.products_total) || 0,
       alignmentBalancingTotal: Number(row.alignment_balancing_total) || 0,
       servicesTotal: Number(row.services_total) || 0,

@@ -370,6 +370,7 @@ export default function App() {
             onDeleteBilling={handleDeleteBilling}
             onResetDemo={() => setBillings(resetBillingsDemo())}
             companySettings={companySettings}
+            employees={employees}
           />
         )}
 
@@ -437,6 +438,7 @@ export default function App() {
             products={products}
             movements={movements}
             invoices={invoices}
+            billings={billings}
           />
         )}
       </main>

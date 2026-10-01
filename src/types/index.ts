@@ -335,6 +335,8 @@ export interface BillingRecord {
   id: string;
   date: string; // YYYY-MM-DD (Data do faturamento da OS)
   serviceOrderNumber: string; // Número da Ordem de Serviço (Ex: OS-1045)
+  collaboratorName?: string; // Nome do colaborador / aplicador / mecânico que realizou o serviço
+  collaboratorId?: string; // ID do colaborador (se cadastrado no sistema)
   productsTotal: number; // Total de Venda de Produto (R$)
   alignmentBalancingTotal: number; // Total de Venda de Alinhamento e Balanceamento (R$)
   servicesTotal: number; // Total de Serviço (outros serviços mecânicos / mão de obra) (R$)

@@ -25,6 +25,7 @@ import {
   Receipt
 } from 'lucide-react';
 import { MovementsBarChart } from './MovementsBarChart';
+import { BillingBarChart } from './BillingBarChart';
 import { exportMovementsHistoryCSV } from '../utils/csvExport';
 import { BillingRecord } from '../types';
 
@@ -55,10 +56,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   // Total de Faturamento registrado
   const totalBillingGrand = useMemo(() => {
-    return billings.reduce((acc, curr) => acc + curr.grandTotal, 0);
+    return billings.reduce((acc, curr) => acc + (Number(curr.grandTotal) || 0), 0);
   }, [billings]);
 
-  // Mês corrente (Setembro 2026)
+  // Faturamentos do mês corrente (Outubro ou Setembro 2026)
+  const currentMonthBillings = useMemo(() => {
+    if (!billings || billings.length === 0) return [];
+    const oct = billings.filter(b => b.date && b.date.startsWith('2026-10'));
+    if (oct.length > 0) return oct;
+    return billings.filter(b => b.date && b.date.startsWith('2026-09'));
+  }, [billings]);
+
+  const currentMonthBillingGrand = useMemo(() => {
+    return currentMonthBillings.reduce((acc, b) => acc + (Number(b.grandTotal) || 0), 0);
+  }, [currentMonthBillings]);
+
+  // Mês corrente para movimentações (Setembro 2026)
   const currentMonthStr = '2026-09';
   const currentMonthInvoices = invoices.filter(
     inv => (inv.entryDate || inv.issueDate).substring(0, 7) === currentMonthStr && inv.status === 'CONFIRMADA'
@@ -198,12 +211,36 @@ export const Dashboard: React.FC<DashboardProps> = ({
       </div>
 
       {/* KPI Stats Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Card 1: Valor em Estoque */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        {/* Card 1: Faturamento de OS no Mês */}
+        <div className="bg-white p-5 rounded-2xl border border-slate-200/90 shadow-2xs hover:shadow-xs transition-shadow">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold uppercase tracking-wider text-blue-700">
+              Faturamento OS (Mês)
+            </span>
+            <div className="p-2 rounded-xl bg-blue-50 text-blue-600">
+              <Receipt className="w-5 h-5" />
+            </div>
+          </div>
+          <div className="text-2xl font-black text-blue-700 mt-2 font-mono tabular-nums">
+            {formatBRL(currentMonthBillingGrand)}
+          </div>
+          <div className="text-xs text-slate-500 mt-1.5 flex items-center justify-between">
+            <span>{currentMonthBillings.length} {currentMonthBillings.length === 1 ? 'OS faturada' : 'OSs faturadas'}</span>
+            <button
+              onClick={() => onNavigate('billing')}
+              className="text-blue-600 font-bold hover:underline cursor-pointer"
+            >
+              Ver OSs
+            </button>
+          </div>
+        </div>
+
+        {/* Card 2: Valor em Estoque */}
         <div className="bg-white p-5 rounded-2xl border border-slate-200/90 shadow-2xs hover:shadow-xs transition-shadow">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
-              Valor Total do Estoque
+              Valor Total Estoque
             </span>
             <div className="p-2 rounded-xl bg-indigo-50 text-indigo-600">
               <Boxes className="w-5 h-5" />
@@ -213,12 +250,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
             {formatBRL(totalStockValue)}
           </div>
           <div className="text-xs text-slate-500 mt-1.5 flex items-center justify-between">
-            <span>{products.length} itens cadastrados</span>
-            <span className="font-semibold text-indigo-700 font-mono tabular-nums">{totalItemsCount} un físicas</span>
+            <span>{products.length} itens</span>
+            <span className="font-semibold text-indigo-700 font-mono tabular-nums">{totalItemsCount} un</span>
           </div>
         </div>
 
-        {/* Card 2: Entradas no Mês */}
+        {/* Card 3: Entradas no Mês */}
         <div className="bg-white p-5 rounded-2xl border border-slate-200/90 shadow-2xs hover:shadow-xs transition-shadow">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold uppercase tracking-wider text-emerald-700">
@@ -232,12 +269,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
             {formatBRL(monthIncomingValue)}
           </div>
           <div className="text-xs text-slate-500 mt-1.5 flex items-center justify-between">
-            <span>{currentMonthInvoices.length} Notas Fiscais</span>
-            <span className="font-semibold text-emerald-700">via NF-e SEFAZ</span>
+            <span>{currentMonthInvoices.length} NFs</span>
+            <span className="font-semibold text-emerald-700">via SEFAZ</span>
           </div>
         </div>
 
-        {/* Card 3: Saídas no Mês */}
+        {/* Card 4: Saídas no Mês */}
         <div className="bg-white p-5 rounded-2xl border border-slate-200/90 shadow-2xs hover:shadow-xs transition-shadow">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold uppercase tracking-wider text-rose-700">
@@ -252,15 +289,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
           <div className="text-xs text-slate-500 mt-1.5 flex items-center justify-between">
             <span>Vendas & Baixas</span>
-            <span className="font-semibold text-rose-700">A custo médio</span>
+            <span className="font-semibold text-rose-700">Custo médio</span>
           </div>
         </div>
 
-        {/* Card 4: Alertas de Reposição */}
+        {/* Card 5: Alertas de Reposição */}
         <div className="bg-white p-5 rounded-2xl border border-slate-200/90 shadow-2xs hover:shadow-xs transition-shadow">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold uppercase tracking-wider text-amber-700">
-              Alertas de Estoque
+              Alertas Estoque
             </span>
             <div className="p-2 rounded-xl bg-amber-50 text-amber-600">
               <AlertTriangle className="w-5 h-5" />
@@ -270,7 +307,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             {lowStockProducts.length} itens
           </div>
           <div className="text-xs text-slate-500 mt-1.5 flex items-center justify-between">
-            <span>Abaixo do estoque mínimo</span>
+            <span>Abaixo do mín.</span>
             <button
               onClick={() => onNavigate('stock')}
               className="text-indigo-600 font-bold hover:underline cursor-pointer"
@@ -280,6 +317,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Gráfico de Barras Recharts: Volume de Faturamento de OS dos Últimos 6 Meses */}
+      <BillingBarChart billings={billings} onNavigateToBilling={() => onNavigate('billing')} />
 
       {/* Gráfico de Barras: Entradas vs Saídas nos Últimos 6 Meses */}
       <MovementsBarChart movements={movements} />

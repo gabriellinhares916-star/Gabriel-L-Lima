@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { BillingRecord, BillingPaymentMethod } from '../types';
+import { BillingRecord, BillingPaymentMethod, Employee } from '../types';
 import { formatBRL, formatDateBR } from '../utils/stockCalculations';
 import { CompanySettings } from '../utils/companySettings';
 import {
@@ -23,8 +23,16 @@ import {
   FileSpreadsheet,
   ArrowUpDown,
   Percent,
-  Check
+  Check,
+  User,
+  UserCheck,
+  Users,
+  BarChart3,
+  ChevronDown,
+  ChevronUp,
+  Layers
 } from 'lucide-react';
+import { BillingAnalytics } from './BillingAnalytics';
 
 interface BillingViewProps {
   billings: BillingRecord[];
@@ -33,6 +41,7 @@ interface BillingViewProps {
   onDeleteBilling: (id: string) => void;
   onResetDemo: () => void;
   companySettings?: CompanySettings;
+  employees?: Employee[];
 }
 
 const PAYMENT_METHOD_LABELS: Record<BillingPaymentMethod, string> = {
@@ -52,15 +61,18 @@ export const BillingView: React.FC<BillingViewProps> = ({
   onDeleteBilling,
   onResetDemo,
   companySettings,
+  employees = [],
 }) => {
   // Modal de Cadastro / Edição
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<BillingRecord | null>(null);
 
   // Filtros
+  const [showAnalytics, setShowAnalytics] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedMonth, setSelectedMonth] = useState<string>('ALL'); // 'ALL' ou 'YYYY-MM'
   const [paymentFilter, setPaymentFilter] = useState<string>('ALL');
+  const [collaboratorFilter, setCollaboratorFilter] = useState<string>('ALL');
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   // Estado do Formulário
@@ -68,6 +80,8 @@ export const BillingView: React.FC<BillingViewProps> = ({
   const [formData, setFormData] = useState({
     date: todayStr,
     serviceOrderNumber: '',
+    collaboratorName: '',
+    collaboratorId: '',
     productsTotal: '',
     alignmentBalancingTotal: '',
     servicesTotal: '',
@@ -91,6 +105,22 @@ export const BillingView: React.FC<BillingViewProps> = ({
     return Array.from(months).sort().reverse();
   }, [billings]);
 
+  // Obter lista única de colaboradores para o filtro
+  const availableCollaborators = useMemo(() => {
+    const collabs = new Set<string>();
+    billings.forEach((b) => {
+      if (b.collaboratorName && b.collaboratorName.trim()) {
+        collabs.add(b.collaboratorName.trim());
+      }
+    });
+    employees.forEach((emp) => {
+      if (emp.name && emp.name.trim()) {
+        collabs.add(emp.name.trim());
+      }
+    });
+    return Array.from(collabs).sort();
+  }, [billings, employees]);
+
   // Filtragem dos registros
   const filteredBillings = useMemo(() => {
     return billings.filter((b) => {
@@ -104,19 +134,25 @@ export const BillingView: React.FC<BillingViewProps> = ({
         if (b.paymentMethod !== paymentFilter) return false;
       }
 
-      // Busca por OS, Cliente ou Placa
+      // Filtro de colaborador
+      if (collaboratorFilter !== 'ALL') {
+        if (b.collaboratorName !== collaboratorFilter) return false;
+      }
+
+      // Busca por OS, Colaborador, Cliente, Placa ou Modelo
       if (searchTerm.trim()) {
         const query = searchTerm.toLowerCase();
         const osMatch = b.serviceOrderNumber.toLowerCase().includes(query);
+        const collaboratorMatch = b.collaboratorName?.toLowerCase().includes(query) ?? false;
         const customerMatch = b.customerName?.toLowerCase().includes(query) ?? false;
         const plateMatch = b.vehiclePlate?.toLowerCase().includes(query) ?? false;
         const modelMatch = b.vehicleModel?.toLowerCase().includes(query) ?? false;
-        if (!osMatch && !customerMatch && !plateMatch && !modelMatch) return false;
+        if (!osMatch && !collaboratorMatch && !customerMatch && !plateMatch && !modelMatch) return false;
       }
 
       return true;
     });
-  }, [billings, selectedMonth, paymentFilter, searchTerm]);
+  }, [billings, selectedMonth, paymentFilter, collaboratorFilter, searchTerm]);
 
   // Totais e Métricas
   const metrics = useMemo(() => {
@@ -124,12 +160,16 @@ export const BillingView: React.FC<BillingViewProps> = ({
     let totalProducts = 0;
     let totalAlignment = 0;
     let totalServices = 0;
+    const collaboratorSet = new Set<string>();
 
     filteredBillings.forEach((b) => {
       totalGrand += b.grandTotal;
       totalProducts += b.productsTotal;
       totalAlignment += b.alignmentBalancingTotal;
       totalServices += b.servicesTotal;
+      if (b.collaboratorName?.trim()) {
+        collaboratorSet.add(b.collaboratorName.trim());
+      }
     });
 
     const count = filteredBillings.length;
@@ -149,6 +189,7 @@ export const BillingView: React.FC<BillingViewProps> = ({
       productsPercent,
       alignmentPercent,
       servicesPercent,
+      collaboratorCount: collaboratorSet.size,
     };
   }, [filteredBillings]);
 
@@ -165,6 +206,8 @@ export const BillingView: React.FC<BillingViewProps> = ({
     setFormData({
       date: todayStr,
       serviceOrderNumber: '',
+      collaboratorName: '',
+      collaboratorId: '',
       productsTotal: '',
       alignmentBalancingTotal: '',
       servicesTotal: '',
@@ -183,6 +226,8 @@ export const BillingView: React.FC<BillingViewProps> = ({
     setFormData({
       date: record.date,
       serviceOrderNumber: record.serviceOrderNumber,
+      collaboratorName: record.collaboratorName || '',
+      collaboratorId: record.collaboratorId || '',
       productsTotal: record.productsTotal.toString(),
       alignmentBalancingTotal: record.alignmentBalancingTotal.toString(),
       servicesTotal: record.servicesTotal.toString(),
@@ -230,6 +275,8 @@ export const BillingView: React.FC<BillingViewProps> = ({
     const payload = {
       date: formData.date,
       serviceOrderNumber: formData.serviceOrderNumber.trim(),
+      collaboratorName: formData.collaboratorName.trim() || undefined,
+      collaboratorId: formData.collaboratorId.trim() || undefined,
       productsTotal: parseFloat(formData.productsTotal) || 0,
       alignmentBalancingTotal: parseFloat(formData.alignmentBalancingTotal) || 0,
       servicesTotal: parseFloat(formData.servicesTotal) || 0,
@@ -255,6 +302,7 @@ export const BillingView: React.FC<BillingViewProps> = ({
     const headers = [
       'Data',
       'Ordem de Serviço',
+      'Colaborador / Mecânico',
       'Cliente',
       'Placa',
       'Veículo',
@@ -269,6 +317,7 @@ export const BillingView: React.FC<BillingViewProps> = ({
     const rows = filteredBillings.map((b) => [
       formatDateBR(b.date),
       `"${b.serviceOrderNumber}"`,
+      `"${b.collaboratorName || ''}"`,
       `"${b.customerName || ''}"`,
       `"${b.vehiclePlate || ''}"`,
       `"${b.vehicleModel || ''}"`,
@@ -310,6 +359,19 @@ export const BillingView: React.FC<BillingViewProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
+          <button
+            onClick={() => setShowAnalytics(!showAnalytics)}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all border cursor-pointer shadow-2xs ${
+              showAnalytics
+                ? 'bg-indigo-600/90 hover:bg-indigo-600 text-white border-indigo-400/40'
+                : 'bg-white/10 hover:bg-white/20 text-white border-white/15'
+            }`}
+            title="Alternar visibilidade do painel de análises detalhadas"
+          >
+            <BarChart3 className="w-4 h-4 text-indigo-200" />
+            <span>{showAnalytics ? 'Ocultar Análises' : 'Exibir Análises'}</span>
+          </button>
+
           <button
             onClick={handleExportCSV}
             disabled={filteredBillings.length === 0}
@@ -482,22 +544,49 @@ export const BillingView: React.FC<BillingViewProps> = ({
         </div>
       )}
 
+      {/* Central de Novas Análises de Faturamento (Colaboradores, Datas, Pagamento, Clientes, Eficiência) */}
+      {showAnalytics && (
+        <BillingAnalytics
+          billings={filteredBillings}
+          allBillings={billings}
+          employees={employees}
+          selectedMonth={selectedMonth}
+          onFilterByCollaborator={(collabName) => {
+            setCollaboratorFilter(collabName);
+            const tableEl = document.getElementById('billing-table-section');
+            if (tableEl) {
+              tableEl.scrollIntoView({ behavior: 'smooth' });
+            }
+          }}
+          onFilterByPayment={(payMethod) => {
+            setPaymentFilter(payMethod);
+            const tableEl = document.getElementById('billing-table-section');
+            if (tableEl) {
+              tableEl.scrollIntoView({ behavior: 'smooth' });
+            }
+          }}
+          onFilterByMonth={(m) => {
+            setSelectedMonth(m);
+          }}
+        />
+      )}
+
       {/* Toolbar de Busca e Filtros */}
-      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+      <div id="billing-table-section" className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 scroll-mt-20">
         
         {/* Campo de Busca */}
         <div className="relative flex-1">
           <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
             type="text"
-            placeholder="Buscar por Número de OS, Cliente, Placa ou Modelo..."
+            placeholder="Buscar por OS, Colaborador / Mecânico, Cliente, Placa ou Modelo..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all"
           />
         </div>
 
-        {/* Filtros de Mês e Forma de Pagamento */}
+        {/* Filtros de Mês, Colaborador e Forma de Pagamento */}
         <div className="flex flex-wrap items-center gap-2">
           
           {/* Filtro Mês */}
@@ -519,6 +608,23 @@ export const BillingView: React.FC<BillingViewProps> = ({
               })}
             </select>
           </div>
+
+          {/* Filtro Colaborador */}
+          {availableCollaborators.length > 0 && (
+            <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5">
+              <UserCheck className="w-3.5 h-3.5 text-indigo-600" />
+              <select
+                value={collaboratorFilter}
+                onChange={(e) => setCollaboratorFilter(e.target.value)}
+                className="bg-transparent text-xs font-semibold text-slate-700 focus:outline-none cursor-pointer max-w-[150px] truncate"
+              >
+                <option value="ALL">Todos Colaboradores</option>
+                {availableCollaborators.map((name) => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* Filtro Pagamento */}
           <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5">
@@ -572,6 +678,7 @@ export const BillingView: React.FC<BillingViewProps> = ({
                 <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider text-[10px]">
                   <th className="py-3 px-4">Data</th>
                   <th className="py-3 px-4">Ordem de Serviço (OS)</th>
+                  <th className="py-3 px-4">Colaborador / Mecânico</th>
                   <th className="py-3 px-4">Cliente / Veículo</th>
                   <th className="py-3 px-4 text-right">Venda Produtos</th>
                   <th className="py-3 px-4 text-right">Alinhamento / Balanceamento</th>
@@ -599,6 +706,22 @@ export const BillingView: React.FC<BillingViewProps> = ({
                           {b.serviceOrderNumber}
                         </span>
                       </div>
+                    </td>
+
+                    {/* Colaborador / Mecânico que Fez o Serviço */}
+                    <td className="py-3.5 px-4">
+                      {b.collaboratorName ? (
+                        <div className="flex items-center gap-2">
+                          <div className="w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-[10px] font-black shrink-0 border border-indigo-200 shadow-2xs">
+                            {b.collaboratorName.charAt(0).toUpperCase()}
+                          </div>
+                          <span className="font-semibold text-slate-800 truncate max-w-[130px] block" title={b.collaboratorName}>
+                            {b.collaboratorName}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-slate-400 italic text-[11px]">—</span>
+                      )}
                     </td>
 
                     {/* Cliente & Veículo */}
@@ -789,6 +912,97 @@ export const BillingView: React.FC<BillingViewProps> = ({
                     <span className="text-[11px] text-rose-600 block mt-1">{formErrors.serviceOrderNumber}</span>
                   )}
                 </div>
+              </div>
+
+              {/* Colaborador / Mecânico que Realizou o Serviço */}
+              <div className="bg-indigo-50/60 p-3.5 rounded-xl border border-indigo-150 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-indigo-950 flex items-center gap-1.5">
+                    <User className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>Colaborador / Mecânico que Fez o Serviço</span>
+                  </label>
+                  <span className="text-[11px] text-indigo-600 font-medium">Responsável pela execução</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {/* Seletor de Colaboradores da Equipe */}
+                  <div>
+                    <select
+                      value={formData.collaboratorId || (employees?.some(e => e.name === formData.collaboratorName) ? employees.find(e => e.name === formData.collaboratorName)?.id : '')}
+                      onChange={(e) => {
+                        const empId = e.target.value;
+                        if (!empId) {
+                          setFormData({ ...formData, collaboratorId: '', collaboratorName: '' });
+                        } else {
+                          const emp = employees?.find((item) => item.id === empId);
+                          if (emp) {
+                            setFormData({
+                              ...formData,
+                              collaboratorId: emp.id,
+                              collaboratorName: emp.name,
+                            });
+                          }
+                        }
+                      }}
+                      className="w-full px-3 py-2 border border-indigo-200 bg-white rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                    >
+                      <option value="">-- Selecionar da Equipe Cadastrada --</option>
+                      {(employees || []).map((emp) => (
+                        <option key={emp.id} value={emp.id}>
+                          {emp.name} ({emp.role})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Campo de Texto Livre para Colaborador / Terceirizado */}
+                  <div>
+                    <input
+                      type="text"
+                      placeholder="Ou digite o nome do colaborador..."
+                      value={formData.collaboratorName}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        const matchingEmp = employees?.find(emp => emp.name.toLowerCase() === val.toLowerCase());
+                        setFormData({
+                          ...formData,
+                          collaboratorName: val,
+                          collaboratorId: matchingEmp ? matchingEmp.id : '',
+                        });
+                      }}
+                      className="w-full px-3 py-2 border border-indigo-200 bg-white rounded-xl text-xs font-medium text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Atalhos Rápidos com os Colaboradores */}
+                {employees && employees.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                    <span className="text-[10px] text-indigo-700 font-semibold uppercase tracking-wider mr-1">
+                      Atalhos Rápidos:
+                    </span>
+                    {employees.slice(0, 5).map((emp) => (
+                      <button
+                        key={emp.id}
+                        type="button"
+                        onClick={() => {
+                          setFormData({
+                            ...formData,
+                            collaboratorId: emp.id,
+                            collaboratorName: emp.name,
+                          });
+                        }}
+                        className={`px-2 py-0.5 rounded-lg text-[10px] font-medium transition-all cursor-pointer ${
+                          formData.collaboratorName === emp.name
+                            ? 'bg-indigo-600 text-white font-bold shadow-2xs'
+                            : 'bg-white text-indigo-900 border border-indigo-200 hover:bg-indigo-100'
+                        }`}
+                      >
+                        {emp.name.split(' ')[0]} {emp.name.split(' ').slice(-1)[0]}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Bloco Destaque: Os 3 Valores Obrigatórios Solicitados */}

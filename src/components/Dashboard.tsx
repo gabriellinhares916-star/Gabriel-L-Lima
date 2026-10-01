@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Product, StockMovement, Invoice } from '../types';
 import { formatBRL, formatDateBR } from '../utils/stockCalculations';
 import { CompanySettings } from '../utils/companySettings';

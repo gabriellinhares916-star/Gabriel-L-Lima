@@ -472,6 +472,7 @@ export default function App() {
           punches,
           advances,
           companySettings,
+          billings,
         }}
         onSyncComplete={(msg) => showToast(msg)}
       />

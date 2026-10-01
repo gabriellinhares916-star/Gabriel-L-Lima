@@ -20,31 +20,43 @@ import {
   Banknote,
   Building2,
   ChevronRight,
-  Sparkles
+  Sparkles,
+  Database,
+  Receipt
 } from 'lucide-react';
 import { MovementsBarChart } from './MovementsBarChart';
 import { exportMovementsHistoryCSV } from '../utils/csvExport';
+import { BillingRecord } from '../types';
 
 interface DashboardProps {
   products: Product[];
   movements: StockMovement[];
   invoices: Invoice[];
+  billings?: BillingRecord[];
   companySettings: CompanySettings;
-  onNavigate: (tab: 'dashboard' | 'entry' | 'stock' | 'prices' | 'timeclock' | 'advances' | 'invoices' | 'reports') => void;
+  onNavigate: (tab: 'dashboard' | 'billing' | 'entry' | 'stock' | 'prices' | 'timeclock' | 'advances' | 'invoices' | 'reports') => void;
   onOpenDanfe: (invoice: Invoice) => void;
   onOpenCompanySettings?: () => void;
+  onOpenSupabaseSync?: () => void;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
   products,
   movements,
   invoices,
+  billings = [],
   companySettings,
   onNavigate,
   onOpenDanfe,
   onOpenCompanySettings,
+  onOpenSupabaseSync,
 }) => {
   const [logoLoadError, setLogoLoadError] = useState(false);
+
+  // Total de Faturamento registrado
+  const totalBillingGrand = useMemo(() => {
+    return billings.reduce((acc, curr) => acc + curr.grandTotal, 0);
+  }, [billings]);
 
   // Mês corrente (Setembro 2026)
   const currentMonthStr = '2026-09';
@@ -134,6 +146,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
           {/* Right: Quick Action Controls */}
           <div className="flex flex-wrap sm:flex-nowrap items-center gap-2.5 shrink-0">
             <button
+              onClick={() => onNavigate('billing')}
+              className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-3.5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl transition-all shadow-md cursor-pointer"
+            >
+              <Receipt className="w-4 h-4" />
+              <span>Faturamento (OS)</span>
+            </button>
+
+            <button
               onClick={() => onNavigate('entry')}
               className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition-all shadow-md hover:shadow-indigo-500/25 cursor-pointer"
             >
@@ -148,6 +168,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
               <Banknote className="w-4 h-4" />
               <span>Vales</span>
             </button>
+
+            {onOpenSupabaseSync && (
+              <button
+                onClick={onOpenSupabaseSync}
+                title="Sincronizar com Banco de Dados Supabase (PostgreSQL)"
+                className="flex items-center justify-center gap-1.5 px-3 py-2.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-xs font-semibold rounded-xl transition-all border border-emerald-400/30 cursor-pointer"
+              >
+                <Database className="w-4 h-4 text-emerald-400" />
+                <span className="hidden sm:inline">Supabase Nuvem</span>
+              </button>
+            )}
 
             {onOpenCompanySettings && (
               <button

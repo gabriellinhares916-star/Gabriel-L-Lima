@@ -12,21 +12,24 @@ import {
   Banknote,
   Building2,
   ChevronDown,
-  Sparkles
+  Sparkles,
+  Database,
+  Receipt
 } from 'lucide-react';
 import { CompanySettings } from '../utils/companySettings';
 
 interface NavbarProps {
-  currentTab: 'dashboard' | 'entry' | 'stock' | 'prices' | 'timeclock' | 'advances' | 'invoices' | 'reports';
-  onSelectTab: (tab: 'dashboard' | 'entry' | 'stock' | 'prices' | 'timeclock' | 'advances' | 'invoices' | 'reports') => void;
+  currentTab: 'dashboard' | 'billing' | 'entry' | 'stock' | 'prices' | 'timeclock' | 'advances' | 'invoices' | 'reports';
+  onSelectTab: (tab: 'dashboard' | 'billing' | 'entry' | 'stock' | 'prices' | 'timeclock' | 'advances' | 'invoices' | 'reports') => void;
   onResetDemo: () => void;
   lowStockAlertsCount: number;
   companySettings: CompanySettings;
   onOpenCompanySettings: () => void;
+  onOpenSupabaseSync?: () => void;
 }
 
 interface NavItem {
-  id: 'dashboard' | 'entry' | 'stock' | 'prices' | 'timeclock' | 'advances' | 'invoices' | 'reports';
+  id: 'dashboard' | 'billing' | 'entry' | 'stock' | 'prices' | 'timeclock' | 'advances' | 'invoices' | 'reports';
   label: string;
   icon: React.ElementType;
   badge?: number;
@@ -40,11 +43,13 @@ export const Navbar: React.FC<NavbarProps> = ({
   lowStockAlertsCount,
   companySettings,
   onOpenCompanySettings,
+  onOpenSupabaseSync,
 }) => {
   const [logoLoadError, setLogoLoadError] = useState(false);
 
   const navItems: NavItem[] = [
     { id: 'dashboard', label: 'Painel', icon: LayoutDashboard },
+    { id: 'billing', label: 'Faturamento', icon: Receipt, accent: true },
     { id: 'entry', label: 'Entrada NF-e', icon: FileInput },
     {
       id: 'stock',
@@ -54,7 +59,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     },
     { id: 'prices', label: 'Preços', icon: Tag },
     { id: 'timeclock', label: 'Ponto', icon: Clock },
-    { id: 'advances', label: 'Vales', icon: Banknote, accent: true },
+    { id: 'advances', label: 'Vales', icon: Banknote },
     { id: 'invoices', label: 'Notas', icon: FileText },
     { id: 'reports', label: 'Relatórios', icon: FileBarChart },
   ];
@@ -153,8 +158,21 @@ export const Navbar: React.FC<NavbarProps> = ({
             })}
           </nav>
 
-          {/* Zone 3: Actions (Demo Reset & SEFAZ Status) */}
+          {/* Zone 3: Actions (Supabase, Demo Reset & SEFAZ Status) */}
           <div className="flex items-center gap-2 shrink-0">
+            {/* Supabase Sync Button */}
+            {onOpenSupabaseSync && (
+              <button
+                onClick={onOpenSupabaseSync}
+                title="Sincronização em Nuvem com Supabase (PostgreSQL)"
+                className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 transition-all cursor-pointer shadow-2xs"
+              >
+                <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <Database className="w-3.5 h-3.5 text-emerald-600" />
+                <span className="hidden sm:inline text-[11px] font-bold">Supabase</span>
+              </button>
+            )}
+
             {/* Mobile / Tablet Logo Settings Icon */}
             <button
               onClick={onOpenCompanySettings}

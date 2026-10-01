@@ -318,4 +318,34 @@ export interface SalaryAdvance {
   updatedAt?: string;
 }
 
+// ==========================================
+// Módulo de Faturamento de Ordens de Serviço (OS)
+// ==========================================
+
+export type BillingPaymentMethod =
+  | 'PIX'
+  | 'DINHEIRO'
+  | 'CARTAO_CREDITO'
+  | 'CARTAO_DEBITO'
+  | 'BOLETO'
+  | 'FATURADO'
+  | 'OUTRO';
+
+export interface BillingRecord {
+  id: string;
+  date: string; // YYYY-MM-DD (Data do faturamento da OS)
+  serviceOrderNumber: string; // Número da Ordem de Serviço (Ex: OS-1045)
+  productsTotal: number; // Total de Venda de Produto (R$)
+  alignmentBalancingTotal: number; // Total de Venda de Alinhamento e Balanceamento (R$)
+  servicesTotal: number; // Total de Serviço (outros serviços mecânicos / mão de obra) (R$)
+  grandTotal: number; // Total Geral da OS (productsTotal + alignmentBalancingTotal + servicesTotal)
+  customerName?: string; // Nome do cliente (opcional)
+  vehiclePlate?: string; // Placa do veículo (opcional)
+  vehicleModel?: string; // Modelo / veículo (opcional)
+  paymentMethod?: BillingPaymentMethod;
+  notes?: string;
+  createdAt: string; // ISO
+  updatedAt?: string;
+}
+
 

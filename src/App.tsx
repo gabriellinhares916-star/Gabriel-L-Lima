@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Product, Invoice, StockMovement, MovementType, Employee, TimePunch, PunchType, SalaryAdvance } from './types';
+import { Product, Invoice, StockMovement, MovementType, Employee, TimePunch, PunchType, SalaryAdvance, BillingRecord } from './types';
 import {
   getStoredProducts,
   saveStoredProducts,
@@ -27,7 +27,24 @@ import {
   deleteSalaryAdvance,
   resetSalaryAdvancesDemo
 } from './utils/salaryAdvancesStorage';
+import {
+  getStoredBillings,
+  addBillingRecord,
+  updateBillingRecord,
+  deleteBillingRecord,
+  resetBillingsDemo
+} from './utils/billingStorage';
 import { CompanySettings, getStoredCompanySettings } from './utils/companySettings';
+import {
+  syncProductsToSupabase,
+  syncMovementsToSupabase,
+  syncInvoicesToSupabase,
+  syncEmployeesToSupabase,
+  syncPunchesToSupabase,
+  syncAdvancesToSupabase,
+  syncCompanySettingsToSupabase,
+  syncBillingsToSupabase,
+} from './utils/supabaseClient';
 import { Navbar } from './components/Navbar';
 import { Dashboard } from './components/Dashboard';
 import { InvoiceEntry } from './components/InvoiceEntry';
@@ -37,19 +54,23 @@ import { MonthlyReportView } from './components/MonthlyReportView';
 import { PriceConsultationView } from './components/PriceConsultationView';
 import { TimeClockDashboard } from './components/TimeClockDashboard';
 import { SalaryAdvancesView } from './components/SalaryAdvancesView';
+import { BillingView } from './components/BillingView';
 import { DanfeModal } from './components/DanfeModal';
 import { CompanySettingsModal } from './components/CompanySettingsModal';
+import { SupabaseSyncModal } from './components/SupabaseSyncModal';
 
 export default function App() {
-  const [currentTab, setCurrentTab] = useState<'dashboard' | 'entry' | 'stock' | 'prices' | 'timeclock' | 'advances' | 'invoices' | 'reports'>('dashboard');
+  const [currentTab, setCurrentTab] = useState<'dashboard' | 'billing' | 'entry' | 'stock' | 'prices' | 'timeclock' | 'advances' | 'invoices' | 'reports'>('dashboard');
   const [products, setProducts] = useState<Product[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [movements, setMovements] = useState<StockMovement[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [punches, setPunches] = useState<TimePunch[]>([]);
   const [advances, setAdvances] = useState<SalaryAdvance[]>([]);
+  const [billings, setBillings] = useState<BillingRecord[]>([]);
   const [companySettings, setCompanySettings] = useState<CompanySettings>(getStoredCompanySettings);
   const [isCompanySettingsModalOpen, setIsCompanySettingsModalOpen] = useState<boolean>(false);
+  const [isSupabaseModalOpen, setIsSupabaseModalOpen] = useState<boolean>(false);
   const [activeDanfeInvoice, setActiveDanfeInvoice] = useState<Invoice | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -61,6 +82,7 @@ export default function App() {
     setEmployees(getStoredEmployees());
     setPunches(getStoredPunches());
     setAdvances(getStoredSalaryAdvances());
+    setBillings(getStoredBillings());
     setCompanySettings(getStoredCompanySettings());
   }, []);
 
@@ -82,6 +104,7 @@ export default function App() {
     const res = registerTimePunch(params);
     if (res.success && res.punch) {
       setPunches(res.punches);
+      syncPunchesToSupabase(res.punches).catch(() => {});
       showToast(`Ponto de ${res.punch.employeeName} registrado com sucesso! NSR: #${res.punch.nsr}`);
     }
     return res;
@@ -100,6 +123,7 @@ export default function App() {
     const res = updateDayPunches(params);
     if (res.success) {
       setPunches(res.punches);
+      syncPunchesToSupabase(res.punches).catch(() => {});
       showToast('Horários do colaborador atualizados com sucesso!');
     }
   };
@@ -109,6 +133,7 @@ export default function App() {
     const res = deleteEmployeePunchesForDate(employeeId, date);
     if (res.success) {
       setPunches(res.punches);
+      syncPunchesToSupabase(res.punches).catch(() => {});
       showToast('Horários do dia removidos com sucesso.');
     }
   };
@@ -122,6 +147,7 @@ export default function App() {
     const updated = [...employees, newEmp];
     setEmployees(updated);
     saveStoredEmployees(updated);
+    syncEmployeesToSupabase(updated).catch(() => {});
     showToast(`Colaborador ${newEmp.name} cadastrado com sucesso!`);
   };
 
@@ -132,6 +158,8 @@ export default function App() {
     if (res.success) {
       setEmployees(res.employees);
       setPunches(res.punches);
+      syncEmployeesToSupabase(res.employees).catch(() => {});
+      syncPunchesToSupabase(res.punches).catch(() => {});
       showToast(`Colaborador ${empToDelete?.name || ''} excluído com sucesso do controle de ponto.`);
     } else if (res.error) {
       alert(res.error);
@@ -143,6 +171,7 @@ export default function App() {
     const res = updateEmployee(updatedEmp);
     if (res.success) {
       setEmployees(res.employees);
+      syncEmployeesToSupabase(res.employees).catch(() => {});
       showToast(`Cadastro e horários de ${updatedEmp.name} atualizados com sucesso!`);
     }
   };
@@ -152,6 +181,7 @@ export default function App() {
     const res = addSalaryAdvance(advanceData);
     if (res.success) {
       setAdvances(res.advances);
+      syncAdvancesToSupabase(res.advances).catch(() => {});
       showToast(`Vale de R$ ${res.advance.amount.toFixed(2).replace('.', ',')} para ${res.advance.employeeName} registrado com sucesso!`);
     }
   };
@@ -161,6 +191,7 @@ export default function App() {
     const res = updateSalaryAdvance(updatedAdvance);
     if (res.success) {
       setAdvances(res.advances);
+      syncAdvancesToSupabase(res.advances).catch(() => {});
       showToast(`Vale de ${updatedAdvance.employeeName} atualizado com sucesso!`);
     }
   };
@@ -170,6 +201,7 @@ export default function App() {
     const res = deleteSalaryAdvance(id);
     if (res.success) {
       setAdvances(res.advances);
+      syncAdvancesToSupabase(res.advances).catch(() => {});
       showToast('Vale excluído com sucesso.');
     }
   };
@@ -178,6 +210,7 @@ export default function App() {
   const handleUpdateProductPrice = (productId: string, newSellingPrice: number) => {
     const updated = updateProductPrice(productId, newSellingPrice);
     setProducts(updated);
+    syncProductsToSupabase(updated).catch(() => {});
     showToast('Preço de venda atualizado com sucesso no estoque!');
   };
 
@@ -187,6 +220,9 @@ export default function App() {
     setProducts(result.products);
     setInvoices(result.invoices);
     setMovements(result.movements);
+    syncProductsToSupabase(result.products).catch(() => {});
+    syncInvoicesToSupabase(result.invoices).catch(() => {});
+    syncMovementsToSupabase(result.movements).catch(() => {});
     showToast(`Entrada da NF-e nº ${invoiceData.number} efetivada com sucesso no estoque!`);
   };
 
@@ -239,19 +275,50 @@ export default function App() {
     showToast(`Produto ${newProduct.name} cadastrado com sucesso!`);
   };
 
+  // Gerenciamento de Faturamento de Ordens de Serviço (OS)
+  const handleAddBilling = (data: Omit<BillingRecord, 'id' | 'createdAt' | 'grandTotal'>) => {
+    const record = addBillingRecord(data);
+    const updated = getStoredBillings();
+    setBillings(updated);
+    syncBillingsToSupabase(updated).catch(() => {});
+    showToast(`Faturamento da ${record.serviceOrderNumber} lançado com sucesso!`);
+  };
+
+  const handleUpdateBilling = (id: string, updates: Partial<BillingRecord>) => {
+    const record = updateBillingRecord(id, updates);
+    if (record) {
+      const updated = getStoredBillings();
+      setBillings(updated);
+      syncBillingsToSupabase(updated).catch(() => {});
+      showToast(`Faturamento da ${record.serviceOrderNumber} atualizado com sucesso!`);
+    }
+  };
+
+  const handleDeleteBilling = (id: string) => {
+    const ok = deleteBillingRecord(id);
+    if (ok) {
+      const updated = getStoredBillings();
+      setBillings(updated);
+      syncBillingsToSupabase(updated).catch(() => {});
+      showToast('Faturamento de OS excluído com sucesso.');
+    }
+  };
+
   // Resetar para dados de demonstração
   const handleResetDemo = () => {
-    if (window.confirm('Deseja recarregar os dados de exemplo do sistema? Isto restaurará os produtos, notas, movimentações, pontos e vales padrão.')) {
+    if (window.confirm('Deseja recarregar os dados de exemplo do sistema? Isto restaurará os produtos, notas, movimentações, pontos, vales e faturamentos padrão.')) {
       const demo = resetDemoDatabase();
       localStorage.removeItem('nfe_stock_employees_v1');
       localStorage.removeItem('nfe_stock_punches_v1');
       localStorage.removeItem('nfe_stock_salary_advances_v1');
+      localStorage.removeItem('lordlub_billing_records_v1');
       setProducts(demo.products);
       setInvoices(demo.invoices);
       setMovements(demo.movements);
       setEmployees(getStoredEmployees());
       setPunches(getStoredPunches());
       setAdvances(resetSalaryAdvancesDemo());
+      setBillings(resetBillingsDemo());
       showToast('Dados de demonstração restaurados com sucesso!');
     }
   };
@@ -276,6 +343,7 @@ export default function App() {
         lowStockAlertsCount={lowStockCount}
         companySettings={companySettings}
         onOpenCompanySettings={() => setIsCompanySettingsModalOpen(true)}
+        onOpenSupabaseSync={() => setIsSupabaseModalOpen(true)}
       />
 
       {/* Main Content View */}
@@ -285,10 +353,23 @@ export default function App() {
             products={products}
             movements={movements}
             invoices={invoices}
+            billings={billings}
             companySettings={companySettings}
             onNavigate={setCurrentTab}
             onOpenDanfe={(inv) => setActiveDanfeInvoice(inv)}
             onOpenCompanySettings={() => setIsCompanySettingsModalOpen(true)}
+            onOpenSupabaseSync={() => setIsSupabaseModalOpen(true)}
+          />
+        )}
+
+        {currentTab === 'billing' && (
+          <BillingView
+            billings={billings}
+            onAddBilling={handleAddBilling}
+            onUpdateBilling={handleUpdateBilling}
+            onDeleteBilling={handleDeleteBilling}
+            onResetDemo={() => setBillings(resetBillingsDemo())}
+            companySettings={companySettings}
           />
         )}
 
@@ -377,6 +458,22 @@ export default function App() {
           setCompanySettings(updated);
           showToast('Logotipo e dados da empresa atualizados com sucesso!');
         }}
+      />
+
+      {/* Modal de Sincronização Supabase */}
+      <SupabaseSyncModal
+        isOpen={isSupabaseModalOpen}
+        onClose={() => setIsSupabaseModalOpen(false)}
+        data={{
+          products,
+          movements,
+          invoices,
+          employees,
+          punches,
+          advances,
+          companySettings,
+        }}
+        onSyncComplete={(msg) => showToast(msg)}
       />
 
       {/* Footer Profissional */}

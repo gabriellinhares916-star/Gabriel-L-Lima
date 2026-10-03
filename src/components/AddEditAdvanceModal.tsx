@@ -20,7 +20,8 @@ export const AddEditAdvanceModal: React.FC<AddEditAdvanceModalProps> = ({
   const [employeeId, setEmployeeId] = useState<string>('');
   const [amount, setAmount] = useState<string>('100.00');
   const [date, setDate] = useState<string>(new Date().toISOString().substring(0, 10));
-  const [competenceMonth, setCompetenceMonth] = useState<string>('2026-09');
+  const [time, setTime] = useState<string>(new Date().toTimeString().substring(0, 8));
+  const [competenceMonth, setCompetenceMonth] = useState<string>('2026-10');
   const [paymentMethod, setPaymentMethod] = useState<AdvancePaymentMethod>('DINHEIRO');
   const [category, setCategory] = useState<AdvanceCategory>('ADIANTAMENTO_SALARIAL');
   const [reason, setReason] = useState<string>('Adiantamento salarial em dinheiro solicitado pelo colaborador');
@@ -34,6 +35,7 @@ export const AddEditAdvanceModal: React.FC<AddEditAdvanceModalProps> = ({
       setEmployeeId(advanceToEdit.employeeId);
       setAmount(advanceToEdit.amount.toString());
       setDate(advanceToEdit.date);
+      setTime(advanceToEdit.time || new Date().toTimeString().substring(0, 8));
       setCompetenceMonth(advanceToEdit.competenceMonth);
       setPaymentMethod(advanceToEdit.paymentMethod);
       setCategory(advanceToEdit.category);
@@ -46,7 +48,8 @@ export const AddEditAdvanceModal: React.FC<AddEditAdvanceModalProps> = ({
       setEmployeeId(employees[0]?.id || '');
       setAmount('150.00');
       setDate(new Date().toISOString().substring(0, 10));
-      setCompetenceMonth('2026-09');
+      setTime(new Date().toTimeString().substring(0, 8));
+      setCompetenceMonth('2026-10');
       setPaymentMethod('DINHEIRO');
       setCategory('ADIANTAMENTO_SALARIAL');
       setReason('Adiantamento salarial em dinheiro solicitado pelo colaborador');
@@ -80,6 +83,7 @@ export const AddEditAdvanceModal: React.FC<AddEditAdvanceModalProps> = ({
       employeeRole: selectedEmp.role,
       employeeDepartment: selectedEmp.department,
       date,
+      time,
       competenceMonth,
       amount: numAmount,
       paymentMethod,
@@ -188,12 +192,12 @@ export const AddEditAdvanceModal: React.FC<AddEditAdvanceModalProps> = ({
             </div>
           </div>
 
-          {/* Data do Vale e Mês de Competência */}
-          <div className="grid grid-cols-2 gap-3">
+          {/* Data do Vale, Hora e Mês de Competência */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="block font-bold text-slate-700 mb-1 flex items-center gap-1">
                 <Calendar className="w-3.5 h-3.5 text-slate-400" />
-                Data da Retirada / Entrega *
+                Data da Retirada *
               </label>
               <input
                 type="date"
@@ -206,7 +210,21 @@ export const AddEditAdvanceModal: React.FC<AddEditAdvanceModalProps> = ({
 
             <div>
               <label className="block font-bold text-slate-700 mb-1">
-                Mês para Desconto (Competência) *
+                Hora Exata (HH:mm:ss) *
+              </label>
+              <input
+                type="time"
+                step="1"
+                required
+                value={time}
+                onChange={(e) => setTime(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 rounded-xl font-mono font-bold"
+              />
+            </div>
+
+            <div>
+              <label className="block font-bold text-slate-700 mb-1">
+                Mês para Desconto *
               </label>
               <input
                 type="month"

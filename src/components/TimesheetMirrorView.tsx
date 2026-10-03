@@ -3,7 +3,12 @@ import { Employee, TimePunch, MonthlyTimeSheetSummary, DailyTimeSheet } from '..
 import { CompanySettings, getStoredCompanySettings } from '../utils/companySettings';
 import {
   calculateEmployeeMonthlyTimesheet,
-  exportIndividualTimesheetCSV
+  exportIndividualTimesheetCSV,
+  getCurrentCompetenceMonth,
+  formatCompetenceMonth,
+  shiftCompetenceMonth,
+  getTimeClockAvailableMonths,
+  CompetenceMonthOption
 } from '../utils/timeClockStorage';
 import { EditDayPunchesModal } from './EditDayPunchesModal';
 import {
@@ -31,6 +36,8 @@ interface TimesheetMirrorViewProps {
   selectedEmployeeId?: string;
   onSelectEmployee: (id: string) => void;
   onNavigateToTerminal: () => void;
+  selectedMonth?: string;
+  onChangeMonth?: (month: string) => void;
   onUpdateDayPunches?: (params: {
     employeeId: string;
     date: string;
@@ -49,12 +56,61 @@ export const TimesheetMirrorView: React.FC<TimesheetMirrorViewProps> = ({
   selectedEmployeeId,
   onSelectEmployee,
   onNavigateToTerminal,
+  selectedMonth,
+  onChangeMonth,
   onUpdateDayPunches,
   onClearDayPunches,
 }) => {
   const companySettings = useMemo(() => getStoredCompanySettings(), []);
   const [logoError, setLogoError] = useState(false);
-  const [currentMonthStr, setCurrentMonthStr] = useState<string>('2026-09');
+  
+  const realCurrentMonth = useMemo(() => getCurrentCompetenceMonth(), []);
+  const [currentMonthStr, setCurrentMonthStr] = useState<string>(() => selectedMonth || realCurrentMonth);
+
+  // Manter em sincronia se o mês for alterado externamente
+  React.useEffect(() => {
+    if (selectedMonth && selectedMonth !== currentMonthStr) {
+      setCurrentMonthStr(selectedMonth);
+    }
+  }, [selectedMonth]);
+
+  const handleMonthChange = (newMonth: string) => {
+    setCurrentMonthStr(newMonth);
+    if (onChangeMonth) {
+      onChangeMonth(newMonth);
+    }
+  };
+
+  const handlePrevMonth = () => {
+    const prev = shiftCompetenceMonth(currentMonthStr, -1);
+    handleMonthChange(prev);
+  };
+
+  const handleNextMonth = () => {
+    const next = shiftCompetenceMonth(currentMonthStr, 1);
+    handleMonthChange(next);
+  };
+
+  const handleGoToCurrentMonth = () => {
+    handleMonthChange(realCurrentMonth);
+  };
+
+  // Lista de competências disponíveis (passadas, atual e subsequentes)
+  const availableMonths = useMemo(() => {
+    return getTimeClockAvailableMonths(punches);
+  }, [punches]);
+
+  // Agrupar por ano para renderização organizada
+  const monthsByYear = useMemo(() => {
+    const map = new Map<number, CompetenceMonthOption[]>();
+    availableMonths.forEach(opt => {
+      const list = map.get(opt.year) || [];
+      list.push(opt);
+      map.set(opt.year, list);
+    });
+    return Array.from(map.entries()).sort((a, b) => b[0] - a[0]);
+  }, [availableMonths]);
+
   const [editingDay, setEditingDay] = useState<DailyTimeSheet | null>(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState<boolean>(false);
   const [customEditDate, setCustomEditDate] = useState<string>('');
@@ -143,21 +199,64 @@ export const TimesheetMirrorView: React.FC<TimesheetMirrorViewProps> = ({
             </div>
           </div>
 
-          {/* Seletor de Mês / Competência */}
-          <div className="flex items-center gap-2 self-start md:self-auto">
-            <label className="text-xs font-semibold text-slate-600 flex items-center gap-1.5">
-              <Calendar className="w-3.5 h-3.5 text-slate-400" />
-              Competência:
-            </label>
-            <select
-              value={currentMonthStr}
-              onChange={(e) => setCurrentMonthStr(e.target.value)}
-              className="px-3 py-1.5 text-xs font-semibold bg-slate-50 border border-slate-300 rounded-lg text-slate-800"
-            >
-              <option value="2026-09">Setembro / 2026 (Ativo)</option>
-              <option value="2026-08">Agosto / 2026</option>
-              <option value="2026-07">Julho / 2026</option>
-            </select>
+          {/* Seletor de Mês / Competência com meses subsequentes e navegação rápida */}
+          <div className="flex flex-wrap items-center gap-1.5 self-start md:self-auto bg-slate-50 p-1.5 rounded-xl border border-slate-200">
+            <div className="flex items-center gap-1 text-slate-600 px-1">
+              <Calendar className="w-3.5 h-3.5 text-indigo-600" />
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-600">
+                Competência:
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={handlePrevMonth}
+                title="Mês Anterior"
+                className="p-1.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-white border border-transparent hover:border-slate-200 transition-all cursor-pointer"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+
+              <select
+                value={currentMonthStr}
+                onChange={(e) => handleMonthChange(e.target.value)}
+                className="px-2.5 py-1.5 text-xs font-bold bg-white border border-slate-300 rounded-lg text-slate-900 shadow-2xs focus:outline-hidden focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+              >
+                {monthsByYear.map(([year, months]) => (
+                  <optgroup
+                    key={year}
+                    label={`Ano ${year}${year > 2026 ? ' • Meses Subsequentes' : year === 2026 ? ' • Ano Corrente' : ''}`}
+                  >
+                    {months.map(m => (
+                      <option key={m.value} value={m.value}>
+                        {m.label} {m.isCurrent ? '⭐ (Mês Atual)' : m.isSubsequent ? '➡️ (Subsequente)' : ''}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+
+              <button
+                type="button"
+                onClick={handleNextMonth}
+                title="Mês Subsequente / Próximo"
+                className="p-1.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-white border border-transparent hover:border-slate-200 transition-all cursor-pointer"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+
+            {currentMonthStr !== realCurrentMonth && (
+              <button
+                type="button"
+                onClick={handleGoToCurrentMonth}
+                className="px-2 py-1 text-[11px] font-bold rounded-lg bg-indigo-100 hover:bg-indigo-200 text-indigo-800 transition-colors cursor-pointer"
+                title="Ir para o mês atual"
+              >
+                Mês Atual
+              </button>
+            )}
           </div>
 
           {/* Botões de Ação */}
@@ -225,7 +324,7 @@ export const TimesheetMirrorView: React.FC<TimesheetMirrorViewProps> = ({
             <div><strong>Empresa:</strong> {companySettings.name}</div>
             <div><strong>CNPJ:</strong> {companySettings.cnpj}</div>
             {companySettings.cityState && <div><strong>Local:</strong> {companySettings.cityState}</div>}
-            <div><strong>Competência:</strong> {currentMonthStr}</div>
+            <div><strong>Competência:</strong> {formatCompetenceMonth(currentMonthStr)} ({currentMonthStr})</div>
           </div>
         </div>
 

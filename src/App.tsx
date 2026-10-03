@@ -8,6 +8,7 @@ import {
   processInvoiceEntry,
   registerStockMovement,
   resetDemoDatabase,
+  clearAllDatabase,
   updateProductPrice
 } from './utils/storage';
 import {
@@ -18,23 +19,28 @@ import {
   updateDayPunches,
   deleteEmployeePunchesForDate,
   updateEmployee,
-  deleteStoredEmployee
+  deleteStoredEmployee,
+  clearAllPunches
 } from './utils/timeClockStorage';
 import {
   getStoredSalaryAdvances,
   addSalaryAdvance,
   updateSalaryAdvance,
   deleteSalaryAdvance,
-  resetSalaryAdvancesDemo
+  resetSalaryAdvancesDemo,
+  clearAllAdvances
 } from './utils/salaryAdvancesStorage';
 import {
   getStoredBillings,
   addBillingRecord,
   updateBillingRecord,
   deleteBillingRecord,
-  resetBillingsDemo
+  resetBillingsDemo,
+  clearAllBillings
 } from './utils/billingStorage';
-import { CompanySettings, getStoredCompanySettings } from './utils/companySettings';
+import { CompanySettings, getStoredCompanySettings, saveStoredCompanySettings } from './utils/companySettings';
+import { AuthUser } from './types/auth';
+import { getStoredAuthSession, clearAuthSession } from './utils/authStorage';
 import {
   syncProductsToSupabase,
   syncMovementsToSupabase,
@@ -55,12 +61,15 @@ import { PriceConsultationView } from './components/PriceConsultationView';
 import { TimeClockDashboard } from './components/TimeClockDashboard';
 import { SalaryAdvancesView } from './components/SalaryAdvancesView';
 import { BillingView } from './components/BillingView';
+import { UserManagementView } from './components/UserManagementView';
+import { LoginScreen } from './components/LoginScreen';
 import { DanfeModal } from './components/DanfeModal';
 import { CompanySettingsModal } from './components/CompanySettingsModal';
 import { SupabaseSyncModal } from './components/SupabaseSyncModal';
 
 export default function App() {
-  const [currentTab, setCurrentTab] = useState<'dashboard' | 'billing' | 'entry' | 'stock' | 'prices' | 'timeclock' | 'advances' | 'invoices' | 'reports'>('dashboard');
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(getStoredAuthSession);
+  const [currentTab, setCurrentTab] = useState<'dashboard' | 'billing' | 'entry' | 'stock' | 'prices' | 'timeclock' | 'advances' | 'invoices' | 'reports' | 'users'>('dashboard');
   const [products, setProducts] = useState<Product[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [movements, setMovements] = useState<StockMovement[]>([]);
@@ -76,6 +85,15 @@ export default function App() {
 
   // Carregar dados na inicialização
   useEffect(() => {
+    const CLEAN_SLATE_FLAG = 'lordlub_clean_slate_today_v5';
+    if (!localStorage.getItem(CLEAN_SLATE_FLAG)) {
+      clearAllDatabase();
+      clearAllBillings();
+      clearAllAdvances();
+      clearAllPunches();
+      localStorage.setItem(CLEAN_SLATE_FLAG, 'true');
+    }
+
     setProducts(getStoredProducts());
     setInvoices(getStoredInvoices());
     setMovements(getStoredMovements());
@@ -304,6 +322,23 @@ export default function App() {
     }
   };
 
+  // Limpar e zerar todos os dados preenchidos para iniciar a partir de hoje
+  const handleClearAllData = () => {
+    if (window.confirm('Tem certeza que deseja APAGAR TODOS OS DADOS preenchidos para iniciar suas operações reais a partir de hoje? Isso limpará todas as ordens de serviço (faturamentos), notas fiscais, movimentações de estoque, batidas de ponto e vales.')) {
+      clearAllDatabase();
+      clearAllBillings();
+      clearAllAdvances();
+      clearAllPunches();
+      setProducts([]);
+      setInvoices([]);
+      setMovements([]);
+      setPunches([]);
+      setAdvances([]);
+      setBillings([]);
+      showToast('Todos os dados foram excluídos! Base zerada para iniciar os lançamentos reais a partir de hoje.');
+    }
+  };
+
   // Resetar para dados de demonstração
   const handleResetDemo = () => {
     if (window.confirm('Deseja recarregar os dados de exemplo do sistema? Isto restaurará os produtos, notas, movimentações, pontos, vales e faturamentos padrão.')) {
@@ -325,6 +360,39 @@ export default function App() {
 
   const lowStockCount = products.filter(p => p.currentStock <= p.minStock).length;
 
+  const handleLogout = () => {
+    clearAuthSession();
+    setCurrentUser(null);
+    showToast('Sessão encerrada com sucesso. Até logo!');
+  };
+
+  // Se o usuário não estiver autenticado, exibir a Tela de Login Centralizada
+  if (!currentUser) {
+    return (
+      <div className="relative">
+        {toastMessage && (
+          <div className="fixed bottom-5 right-5 z-50 bg-slate-900 text-white px-4 py-3 rounded-xl shadow-xl border border-slate-800 text-xs font-semibold flex items-center gap-2 animate-bounce">
+            <span className="w-2 h-2 rounded-full bg-emerald-400" />
+            <span>{toastMessage}</span>
+          </div>
+        )}
+        <LoginScreen
+          onLoginSuccess={(user) => {
+            setCurrentUser(user);
+            showToast(`Bem-vindo ao sistema, ${user.name}!`);
+          }}
+          companySettings={companySettings}
+          onUpdateLogo={(newLogo) => {
+            const updated = { ...companySettings, logoUrl: newLogo };
+            saveStoredCompanySettings(updated);
+            setCompanySettings(updated);
+            showToast('Logo da empresa atualizada com sucesso!');
+          }}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900 selection:bg-indigo-100 selection:text-indigo-900">
       {/* Toast Notification */}
@@ -340,10 +408,13 @@ export default function App() {
         currentTab={currentTab}
         onSelectTab={setCurrentTab}
         onResetDemo={handleResetDemo}
+        onClearAllData={handleClearAllData}
         lowStockAlertsCount={lowStockCount}
         companySettings={companySettings}
         onOpenCompanySettings={() => setIsCompanySettingsModalOpen(true)}
         onOpenSupabaseSync={() => setIsSupabaseModalOpen(true)}
+        currentUser={currentUser}
+        onLogout={handleLogout}
       />
 
       {/* Main Content View */}
@@ -354,6 +425,8 @@ export default function App() {
             movements={movements}
             invoices={invoices}
             billings={billings}
+            employees={employees}
+            punches={punches}
             companySettings={companySettings}
             onNavigate={setCurrentTab}
             onOpenDanfe={(inv) => setActiveDanfeInvoice(inv)}
@@ -439,6 +512,18 @@ export default function App() {
             movements={movements}
             invoices={invoices}
             billings={billings}
+          />
+        )}
+
+        {currentTab === 'users' && (
+          <UserManagementView
+            currentUser={currentUser}
+            onUpdateCurrentUser={(updated) => {
+              if (currentUser && currentUser.id === updated.id) {
+                setCurrentUser(updated);
+              }
+            }}
+            onNotify={(msg) => showToast(msg)}
           />
         )}
       </main>

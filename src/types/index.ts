@@ -295,7 +295,23 @@ export type AdvanceCategory =
   | 'VALE_TRANSPORTE_EXTRA'
   | 'AJUDA_DE_CUSTO'
   | 'OUTRO';
-export type AdvanceStatus = 'PENDENTE_DESCONTO' | 'DESCONTADO_FOLHA' | 'CANCELADO';
+export type AdvanceStatus = 'PENDENTE_DESCONTO' | 'PARCIALMENTE_BAIXADO' | 'DESCONTADO_FOLHA' | 'CANCELADO';
+export type AdvanceMovementType = 'ADICAO_VALOR' | 'BAIXA_VALOR';
+
+export interface AdvanceMovement {
+  id: string;
+  advanceId?: string;
+  type: AdvanceMovementType; // 'ADICAO_VALOR' ou 'BAIXA_VALOR'
+  amount: number;
+  dateTime: string; // ISO ou Timestamp completo ex: 2026-10-02T16:55:00.000Z
+  date: string; // YYYY-MM-DD
+  time: string; // HH:mm:ss
+  paymentMethod: AdvancePaymentMethod; // Dinheiro em espécie, Pix, etc.
+  reason: string; // Motivo da adição ou da baixa
+  approvedBy?: string; // Responsável que realizou/autorizou o lançamento
+  notes?: string;
+  receiptNumber?: string;
+}
 
 export interface SalaryAdvance {
   id: string;
@@ -305,17 +321,21 @@ export interface SalaryAdvance {
   employeeRole: string;
   employeeDepartment: string;
   date: string; // YYYY-MM-DD (data da entrega do adiantamento)
+  time?: string; // HH:mm:ss
   competenceMonth: string; // YYYY-MM (mês de referência para desconto em folha)
-  amount: number; // Valor em reais R$
+  amount: number; // Valor Total Concedido em reais R$ (soma de adições)
+  balanceAmount?: number; // Saldo devedor atual a pagar / a baixar
+  totalPaidAmount?: number; // Total já baixado / quitado
   paymentMethod: AdvancePaymentMethod; // Dinheiro em espécie, Pix, etc.
   category: AdvanceCategory;
   reason: string; // Motivo ou descrição
-  status: AdvanceStatus; // Pendente ou Já Descontado
+  status: AdvanceStatus; // Pendente, Parcialmente Baixado ou Descontado em Folha
   approvedBy?: string; // Responsável pela liberação do dinheiro
   receiptSigned?: boolean; // Se assinou recibo físico
   notes?: string;
   createdAt: string; // ISO
   updatedAt?: string;
+  movements?: AdvanceMovement[]; // Histórico detalhado de adições e baixas com data e hora
 }
 
 // ==========================================
@@ -349,5 +369,58 @@ export interface BillingRecord {
   createdAt: string; // ISO
   updatedAt?: string;
 }
+
+// ==========================================
+// Módulo de Despesas & Contas a Pagar
+// ==========================================
+
+export type ExpenseCategory =
+  | 'ALUGUEL'
+  | 'ENERGIA'
+  | 'AGUA'
+  | 'MANUTENCAO'
+  | 'INTERNET_TELEFONIA'
+  | 'IMPOSTOS_TAXAS'
+  | 'CONTABILIDADE'
+  | 'MATERIAL_CONSUMO'
+  | 'SEGUROS'
+  | 'MARKETING'
+  | 'COMBUSTIVEL'
+  | 'OUTRAS';
+
+export type ExpenseStatus = 'PENDENTE' | 'PAGA' | 'VENCIDA' | 'CANCELADA';
+export type ExpensePaymentMethod = 'BOLETO' | 'PIX' | 'TRANSFERENCIA' | 'DEBITO_AUTOMATICO' | 'DINHEIRO' | 'CARTAO_CREDITO' | 'OUTRO';
+
+export interface ExpenseRecord {
+  id: string;
+  description: string; // Ex: Aluguel do Galpão, Conta de Luz CEMIG, Manutenção Predial
+  category: ExpenseCategory;
+  customCategoryName?: string;
+  amount: number; // R$
+  dueDate: string; // YYYY-MM-DD (Vencimento)
+  paymentDate?: string; // YYYY-MM-DD (Data da liquidação)
+  paymentTime?: string; // HH:mm:ss
+  competenceMonth: string; // YYYY-MM
+  status: ExpenseStatus;
+  paymentMethod: ExpensePaymentMethod;
+  supplierOrBeneficiary: string; // Fornecedor / Concessionária / Favorecido
+  documentNumber?: string; // Nº NF / Fatura / Código de Barras
+  notes?: string;
+  isRecurring?: boolean; // Se é despesa fixa recorrente
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface ExpenseCategorySummary {
+  category: ExpenseCategory;
+  label: string;
+  color: string;
+  totalAmount: number;
+  paidAmount: number;
+  pendingAmount: number;
+  count: number;
+  percentage: number;
+}
+
 
 

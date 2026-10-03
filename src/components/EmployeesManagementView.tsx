@@ -2,9 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { Employee, TimePunch } from '../types';
 import {
   calculateEmployeeMonthlyTimesheet,
-  exportConsolidatedTimeClockCSV
+  exportConsolidatedTimeClockCSV,
+  getCurrentCompetenceMonth,
+  formatCompetenceMonth,
+  getTimeClockAvailableMonths
 } from '../utils/timeClockStorage';
 import { EditEmployeeModal } from './EditEmployeeModal';
+import { DepartmentManagerModal } from './DepartmentManagerModal';
+import { getStoredDepartments } from '../utils/departmentStorage';
 import {
   Users,
   UserPlus,
@@ -13,6 +18,7 @@ import {
   Clock,
   Briefcase,
   Building,
+  Building2,
   KeyRound,
   Eye,
   CheckCircle,
@@ -25,7 +31,8 @@ import {
   Mail,
   Calendar,
   DollarSign,
-  UserX
+  UserX,
+  Plus
 } from 'lucide-react';
 
 interface EmployeesManagementViewProps {
@@ -38,6 +45,8 @@ interface EmployeesManagementViewProps {
   onSelectEmployeeForPunch: (employeeId: string) => void;
   isOpenAddModalExternally?: boolean;
   onCloseExternalAddModal?: () => void;
+  selectedCompetenceMonth?: string;
+  onChangeCompetenceMonth?: (month: string) => void;
 }
 
 export const EmployeesManagementView: React.FC<EmployeesManagementViewProps> = ({
@@ -50,20 +59,50 @@ export const EmployeesManagementView: React.FC<EmployeesManagementViewProps> = (
   onSelectEmployeeForPunch,
   isOpenAddModalExternally = false,
   onCloseExternalAddModal,
+  selectedCompetenceMonth,
+  onChangeCompetenceMonth,
 }) => {
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [selectedDept, setSelectedDept] = useState<string>('ALL');
+
+  const realCurrentMonth = React.useMemo(() => getCurrentCompetenceMonth(), []);
+  const [competenceMonth, setCompetenceMonth] = useState<string>(() => selectedCompetenceMonth || realCurrentMonth);
+
+  React.useEffect(() => {
+    if (selectedCompetenceMonth && selectedCompetenceMonth !== competenceMonth) {
+      setCompetenceMonth(selectedCompetenceMonth);
+    }
+  }, [selectedCompetenceMonth]);
+
+  const handleCompetenceChange = (m: string) => {
+    setCompetenceMonth(m);
+    if (onChangeCompetenceMonth) {
+      onChangeCompetenceMonth(m);
+    }
+  };
+
+  const availableMonths = React.useMemo(() => {
+    return getTimeClockAvailableMonths(punches);
+  }, [punches]);
+
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
   const [employeeToDelete, setEmployeeToDelete] = useState<Employee | null>(null);
+
+  // Departamentos dinâmicos (Cadastrar e Excluir)
+  const [availableDepartments, setAvailableDepartments] = useState<string[]>(getStoredDepartments);
+  const [isDeptManagerOpen, setIsDeptManagerOpen] = useState<boolean>(false);
 
   // Form states
   const [name, setName] = useState<string>('');
   const [registrationNumber, setRegistrationNumber] = useState<string>('');
   const [cpf, setCpf] = useState<string>('');
   const [role, setRole] = useState<string>('Auxiliar de Almoxarifado');
-  const [department, setDepartment] = useState<string>('Almoxarifado & Estoque');
-  const [workShift, setWorkShift] = useState<string>('08:00 às 17:00 (Segunda a Sexta)');
+  const [department, setDepartment] = useState<string>(() => {
+    const list = getStoredDepartments();
+    return list[0] || 'Oficina Mecânica';
+  });
+  const [workShift, setWorkShift] = useState<string>('Segunda a Sábado (Seg a Sex: 8h líquidas | Sáb: 4h líquidas - 44h)');
   const [dailyHoursExpected, setDailyHoursExpected] = useState<number>(8.0);
   const [pin, setPin] = useState<string>('');
   const [phone, setPhone] = useState<string>('');
@@ -81,20 +120,20 @@ export const EmployeesManagementView: React.FC<EmployeesManagementViewProps> = (
     }
   }, [isOpenAddModalExternally]);
 
-  const currentMonthStr = '2026-09';
-  const departments = Array.from(new Set(employees.map(e => e.department).filter(Boolean)));
+  const allDepartments = Array.from(new Set([...availableDepartments, ...employees.map(e => e.department).filter(Boolean)]));
 
   const handleOpenAddModal = () => {
-    // Gerar matrícula sugerida
     const nextMatricula = `MAT-${1000 + employees.length + 1}`;
     const randomPin = String(Math.floor(1000 + Math.random() * 9000));
+    const depts = getStoredDepartments();
+    setAvailableDepartments(depts);
     setRegistrationNumber(nextMatricula);
     setPin(randomPin);
     setName('');
     setCpf('');
-    setRole('Auxiliar de Estoque');
-    setDepartment('Almoxarifado & Estoque');
-    setWorkShift('08:00 às 17:00 (Segunda a Sexta)');
+    setRole('Mecânico');
+    setDepartment(depts[0] || 'Oficina Mecânica');
+    setWorkShift('Segunda a Sábado (Seg a Sex: 8h líquidas | Sáb: 4h líquidas - 44h)');
     setDailyHoursExpected(8.0);
     setPhone('');
     setEmail('');
@@ -159,14 +198,20 @@ export const EmployeesManagementView: React.FC<EmployeesManagementViewProps> = (
   };
 
   const handleExportConsolidated = () => {
-    exportConsolidatedTimeClockCSV(employees, punches, currentMonthStr);
+    exportConsolidatedTimeClockCSV(employees, punches, competenceMonth);
   };
 
   const presetShifts = [
-    { label: '08:00 às 17:00 (Seg a Sex)', hours: 8.0 },
-    { label: '07:30 às 17:18 (Seg a Sex - 44h)', hours: 8.8 },
-    { label: '07:00 às 16:00 (Seg a Sex)', hours: 8.0 },
-    { label: '12x36 Diurno (07:00 às 19:00)', hours: 12.0 },
+    {
+      label: 'Seg a Sáb (Seg-Sex: 8h | Sáb: 4h líquidas - 44h)',
+      shiftText: 'Segunda a Sábado (Seg a Sex: 8h líquidas | Sáb: 4h líquidas - 44h)',
+      hours: 8.0,
+      highlight: true,
+    },
+    { label: '08:00 às 17:00 (Seg a Sex)', shiftText: '08:00 às 17:00 (Seg a Sex)', hours: 8.0 },
+    { label: '07:30 às 17:18 (Seg a Sex - 44h)', shiftText: '07:30 às 17:18 (Seg a Sex - 44h)', hours: 8.8 },
+    { label: '07:00 às 16:00 (Seg a Sex)', shiftText: '07:00 às 16:00 (Seg a Sex)', hours: 8.0 },
+    { label: '12x36 Diurno (07:00 às 19:00)', shiftText: '12x36 Diurno (07:00 às 19:00)', hours: 12.0 },
   ];
 
   return (
@@ -208,9 +253,9 @@ export const EmployeesManagementView: React.FC<EmployeesManagementViewProps> = (
           </div>
         </div>
 
-        {/* Barra de Busca e Filtro de Departamento */}
+        {/* Barra de Busca e Filtros de Departamento e Competência (Mês) */}
         {employees.length > 0 && (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 pt-2">
             <div className="sm:col-span-2 relative">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
@@ -226,11 +271,25 @@ export const EmployeesManagementView: React.FC<EmployeesManagementViewProps> = (
               <select
                 value={selectedDept}
                 onChange={(e) => setSelectedDept(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium text-slate-700 focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium text-slate-700 focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-hidden cursor-pointer"
               >
                 <option value="ALL">Todos os Departamentos ({employees.length})</option>
-                {departments.map(d => (
+                {allDepartments.map(d => (
                   <option key={d} value={d}>{d}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <select
+                value={competenceMonth}
+                onChange={(e) => handleCompetenceChange(e.target.value)}
+                className="w-full px-3 py-2 bg-indigo-50/60 border border-indigo-200 rounded-xl text-xs font-bold text-indigo-900 focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-hidden cursor-pointer"
+              >
+                {availableMonths.map(m => (
+                  <option key={m.value} value={m.value}>
+                    Competência: {m.label} {m.isCurrent ? '⭐ (Mês Atual)' : m.isSubsequent ? '➡️ (Subsequente)' : ''}
+                  </option>
                 ))}
               </select>
             </div>
@@ -290,7 +349,7 @@ export const EmployeesManagementView: React.FC<EmployeesManagementViewProps> = (
       {filteredEmployees.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredEmployees.map(emp => {
-            const summary = calculateEmployeeMonthlyTimesheet(emp, currentMonthStr, punches);
+            const summary = calculateEmployeeMonthlyTimesheet(emp, competenceMonth, punches);
             const isPositive = summary.bankBalanceHours >= 0;
             const employeePunchCount = punches.filter(p => p.employeeId === emp.id).length;
 
@@ -352,7 +411,7 @@ export const EmployeesManagementView: React.FC<EmployeesManagementViewProps> = (
                   <div className="grid grid-cols-2 gap-2 mt-3 text-center">
                     <div className="p-2 rounded-lg bg-slate-50 border border-slate-100">
                       <span className="text-[10px] text-slate-400 block font-semibold uppercase">
-                        Trabalhadas ({currentMonthStr.substring(5)}/26)
+                        Trabalhadas ({competenceMonth.substring(5)}/{competenceMonth.substring(2, 4)})
                       </span>
                       <span className="text-xs font-bold text-slate-800">
                         {summary.totalWorkedHours.toFixed(1)}h
@@ -579,20 +638,37 @@ export const EmployeesManagementView: React.FC<EmployeesManagementViewProps> = (
                   </datalist>
                 </div>
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">
-                    Departamento *
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block font-bold text-slate-700">
+                      Departamento *
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setIsDeptManagerOpen(true)}
+                      className="text-[11px] text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-1 cursor-pointer transition-colors"
+                      title="Cadastrar novo departamento ou excluir existente"
+                    >
+                      <Building2 className="w-3 h-3 text-indigo-600" />
+                      <span>+ Cadastrar / Excluir</span>
+                    </button>
+                  </div>
                   <select
                     value={department}
-                    onChange={(e) => setDepartment(e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl bg-white"
+                    onChange={(e) => {
+                      if (e.target.value === '__MANAGE__') {
+                        setIsDeptManagerOpen(true);
+                      } else {
+                        setDepartment(e.target.value);
+                      }
+                    }}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl bg-white font-medium text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
                   >
-                    <option value="Almoxarifado & Estoque">Almoxarifado & Estoque</option>
-                    <option value="Recebimento Fiscal">Recebimento Fiscal</option>
-                    <option value="Estoque & Logística">Estoque & Logística</option>
-                    <option value="Expedição & Armazém">Expedição & Armazém</option>
-                    <option value="Faturamento & Controle">Faturamento & Controle</option>
-                    <option value="Administrativo">Administrativo</option>
+                    {availableDepartments.map((d) => (
+                      <option key={d} value={d}>{d}</option>
+                    ))}
+                    <option value="__MANAGE__" className="text-indigo-600 font-bold bg-indigo-50">
+                      ⚙️ Gerenciar Departamentos (Cadastrar / Excluir)...
+                    </option>
                   </select>
                 </div>
               </div>
@@ -614,7 +690,7 @@ export const EmployeesManagementView: React.FC<EmployeesManagementViewProps> = (
                       type="text"
                       value={workShift}
                       onChange={(e) => setWorkShift(e.target.value)}
-                      placeholder="Ex: 08:00 às 17:00 (Segunda a Sexta)"
+                      placeholder="Ex: Segunda a Sábado (Seg a Sex: 8h líquidas | Sáb: 4h líquidas - 44h)"
                       className="w-full px-3 py-2 border border-slate-300 rounded-xl bg-white"
                     />
                   </div>
@@ -639,15 +715,27 @@ export const EmployeesManagementView: React.FC<EmployeesManagementViewProps> = (
                       key={idx}
                       type="button"
                       onClick={() => {
-                        setWorkShift(preset.label);
+                        setWorkShift(preset.shiftText || preset.label);
                         setDailyHoursExpected(preset.hours);
                       }}
-                      className="px-2 py-1 rounded bg-white hover:bg-indigo-50 hover:text-indigo-600 border border-slate-200 text-[10px] font-semibold transition-colors cursor-pointer"
+                      className={`px-2.5 py-1 rounded-lg border text-[10px] font-semibold transition-colors cursor-pointer ${
+                        preset.highlight
+                          ? 'bg-emerald-50 border-emerald-300 text-emerald-800 hover:bg-emerald-100 font-bold'
+                          : 'bg-white hover:bg-indigo-50 hover:text-indigo-600 border-slate-200'
+                      }`}
                     >
                       {preset.label}
                     </button>
                   ))}
                 </div>
+
+                {/* Aviso informativo de jornada Seg a Sáb */}
+                {(workShift.toLowerCase().includes('sáb') || workShift.toLowerCase().includes('sab')) && (
+                  <div className="p-2 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] flex items-center gap-1.5 font-medium">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+                    <span>Jornada Seg a Sáb ativa: <strong>8 horas líquidas</strong> (Segunda a Sexta) e <strong>4 horas líquidas</strong> no sábado (Total: 44h semanais).</span>
+                  </div>
+                )}
               </div>
 
               {/* PIN do Relógio e Data de Admissão */}
@@ -758,6 +846,16 @@ export const EmployeesManagementView: React.FC<EmployeesManagementViewProps> = (
           }}
         />
       )}
+
+      {/* Modal de Gerenciamento de Departamentos (Cadastrar e Excluir) */}
+      <DepartmentManagerModal
+        isOpen={isDeptManagerOpen}
+        onClose={() => setIsDeptManagerOpen(false)}
+        employees={employees}
+        currentDepartment={department}
+        onSelectDepartment={(deptName) => setDepartment(deptName)}
+        onDepartmentsChange={(newDepts) => setAvailableDepartments(newDepts)}
+      />
     </div>
   );
 };

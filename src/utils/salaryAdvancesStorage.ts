@@ -1,8 +1,76 @@
-import { SalaryAdvance, Employee } from '../types';
+import { SalaryAdvance, Employee, AdvanceMovement, AdvanceStatus } from '../types';
 
 const STORAGE_KEY = 'nfe_stock_salary_advances_clean_v1';
 
 export const INITIAL_SALARY_ADVANCES: SalaryAdvance[] = [];
+
+/**
+ * Garante a integridade financeira e de histórico de um vale,
+ * recalculando saldo devedor, total pago e status a partir dos lançamentos (movimentações)
+ */
+export function ensureAdvanceIntegrity(rawAdv: any): SalaryAdvance {
+  const baseAmount = Number(rawAdv.amount) || 0;
+  let movements: AdvanceMovement[] = Array.isArray(rawAdv.movements) ? [...rawAdv.movements] : [];
+
+  // Se não possuir movimentações registradas, inicializa com o primeiro lançamento de adição
+  if (movements.length === 0 && baseAmount > 0) {
+    const createdAt = rawAdv.createdAt || new Date().toISOString();
+    const [dPart, tPart] = createdAt.split('T');
+    const time = rawAdv.time || (tPart ? tPart.substring(0, 8) : '08:00:00');
+    movements = [
+      {
+        id: `mov-init-${rawAdv.id || Date.now()}`,
+        advanceId: rawAdv.id,
+        type: 'ADICAO_VALOR',
+        amount: baseAmount,
+        dateTime: createdAt,
+        date: rawAdv.date || dPart || new Date().toISOString().substring(0, 10),
+        time,
+        paymentMethod: rawAdv.paymentMethod || 'DINHEIRO',
+        reason: rawAdv.reason || 'Lançamento inicial de adiantamento',
+        approvedBy: rawAdv.approvedBy || '',
+        notes: rawAdv.notes || '',
+      }
+    ];
+  }
+
+  // Recalcular montantes a partir das movimentações registradas com data e hora
+  let totalAdded = 0;
+  let totalPaid = 0;
+
+  movements.forEach(m => {
+    const val = Number(m.amount) || 0;
+    if (m.type === 'ADICAO_VALOR') {
+      totalAdded += val;
+    } else if (m.type === 'BAIXA_VALOR') {
+      totalPaid += val;
+    }
+  });
+
+  const finalAmount = totalAdded > 0 ? Math.round(totalAdded * 100) / 100 : baseAmount;
+  const finalPaid = Math.round(totalPaid * 100) / 100;
+  const balanceAmount = Math.max(0, Math.round((finalAmount - finalPaid) * 100) / 100);
+
+  let status: AdvanceStatus = rawAdv.status || 'PENDENTE_DESCONTO';
+  if (status !== 'CANCELADO') {
+    if (balanceAmount <= 0.009) {
+      status = 'DESCONTADO_FOLHA';
+    } else if (finalPaid > 0) {
+      status = 'PARCIALMENTE_BAIXADO';
+    } else {
+      status = 'PENDENTE_DESCONTO';
+    }
+  }
+
+  return {
+    ...rawAdv,
+    amount: finalAmount,
+    balanceAmount,
+    totalPaidAmount: finalPaid,
+    status,
+    movements,
+  };
+}
 
 export function getStoredSalaryAdvances(): SalaryAdvance[] {
   const data = localStorage.getItem(STORAGE_KEY);
@@ -13,11 +81,7 @@ export function getStoredSalaryAdvances(): SalaryAdvance[] {
   try {
     const parsed = JSON.parse(data);
     if (!Array.isArray(parsed)) return [];
-    // Garantir conversões numéricas para evitar erros de soma
-    return parsed.map((item: any) => ({
-      ...item,
-      amount: Number(item.amount) || 0,
-    }));
+    return parsed.map((item: any) => ensureAdvanceIntegrity(item));
   } catch (err) {
     console.error('Erro ao ler vales/adiantamentos:', err);
     return [];
@@ -31,20 +95,49 @@ export function clearAllAdvances(): SalaryAdvance[] {
 }
 
 export function saveStoredSalaryAdvances(advances: SalaryAdvance[]): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(advances));
+  const validated = advances.map(a => ensureAdvanceIntegrity(a));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(validated));
 }
 
 export function addSalaryAdvance(
   advanceData: Omit<SalaryAdvance, 'id' | 'createdAt'>
 ): { success: boolean; advance: SalaryAdvance; advances: SalaryAdvance[] } {
   const current = getStoredSalaryAdvances();
-  const now = new Date().toISOString();
-  const newAdvance: SalaryAdvance = {
-    ...advanceData,
-    id: `vale-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-    amount: Number(advanceData.amount) || 0,
-    createdAt: now,
+  const now = new Date();
+  const nowISO = now.toISOString();
+  const nowTime = now.toTimeString().substring(0, 8);
+  const id = `vale-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+  const amount = Number(advanceData.amount) || 0;
+
+  // Lançamento inicial na conta do vale
+  const initialMovement: AdvanceMovement = {
+    id: `mov-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+    advanceId: id,
+    type: 'ADICAO_VALOR',
+    amount,
+    dateTime: nowISO,
+    date: advanceData.date || nowISO.substring(0, 10),
+    time: advanceData.time || nowTime,
+    paymentMethod: advanceData.paymentMethod || 'DINHEIRO',
+    reason: advanceData.reason || 'Concessão inicial de adiantamento',
+    approvedBy: advanceData.approvedBy || '',
+    notes: advanceData.notes || '',
   };
+
+  const newAdvance: SalaryAdvance = ensureAdvanceIntegrity({
+    ...advanceData,
+    id,
+    amount,
+    time: advanceData.time || nowTime,
+    balanceAmount: amount,
+    totalPaidAmount: 0,
+    status: 'PENDENTE_DESCONTO',
+    movements: advanceData.movements && advanceData.movements.length > 0
+      ? advanceData.movements
+      : [initialMovement],
+    createdAt: nowISO,
+    updatedAt: nowISO,
+  });
 
   const updated = [newAdvance, ...current];
   saveStoredSalaryAdvances(updated);
@@ -58,22 +151,100 @@ export function addSalaryAdvance(
 
 export function updateSalaryAdvance(
   updatedAdvance: SalaryAdvance
-): { success: boolean; advances: SalaryAdvance[]; error?: string } {
+): { success: boolean; advances: SalaryAdvance[]; advance?: SalaryAdvance; error?: string } {
   const current = getStoredSalaryAdvances();
   const index = current.findIndex(v => v.id === updatedAdvance.id);
   if (index === -1) {
     return { success: false, advances: current, error: 'Vale não encontrado.' };
   }
 
-  const updated = [...current];
-  updated[index] = {
+  const validated = ensureAdvanceIntegrity({
     ...updatedAdvance,
-    amount: Number(updatedAdvance.amount) || 0,
     updatedAt: new Date().toISOString(),
-  };
+  });
+
+  const updated = [...current];
+  updated[index] = validated;
 
   saveStoredSalaryAdvances(updated);
-  return { success: true, advances: updated };
+  return { success: true, advances: updated, advance: validated };
+}
+
+/**
+ * Adiciona uma nova movimentação (Adição de Valor ou Baixa/Quitação) ao card do vale
+ * com registro fiel de Data e Hora
+ */
+export function addMovementToAdvance(
+  advanceId: string,
+  movementData: Omit<AdvanceMovement, 'id' | 'advanceId'>
+): { success: boolean; advance?: SalaryAdvance; advances: SalaryAdvance[]; error?: string } {
+  const current = getStoredSalaryAdvances();
+  const index = current.findIndex(v => v.id === advanceId);
+  if (index === -1) {
+    return { success: false, advances: current, error: 'Vale não encontrado.' };
+  }
+
+  const target = current[index];
+  const newMovementId = `mov-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+  const now = new Date();
+
+  const newMovement: AdvanceMovement = {
+    ...movementData,
+    id: newMovementId,
+    advanceId,
+    amount: Number(movementData.amount) || 0,
+    dateTime: movementData.dateTime || now.toISOString(),
+    date: movementData.date || now.toISOString().substring(0, 10),
+    time: movementData.time || now.toTimeString().substring(0, 8),
+  };
+
+  const updatedMovements = [...(target.movements || []), newMovement];
+  const updatedAdvance = ensureAdvanceIntegrity({
+    ...target,
+    movements: updatedMovements,
+    updatedAt: now.toISOString(),
+  });
+
+  current[index] = updatedAdvance;
+  saveStoredSalaryAdvances(current);
+
+  return {
+    success: true,
+    advance: updatedAdvance,
+    advances: current,
+  };
+}
+
+/**
+ * Exclui uma movimentação específica de um vale e recalcula os totais do card
+ */
+export function deleteMovementFromAdvance(
+  advanceId: string,
+  movementId: string
+): { success: boolean; advance?: SalaryAdvance; advances: SalaryAdvance[]; error?: string } {
+  const current = getStoredSalaryAdvances();
+  const index = current.findIndex(v => v.id === advanceId);
+  if (index === -1) {
+    return { success: false, advances: current, error: 'Vale não encontrado.' };
+  }
+
+  const target = current[index];
+  const updatedMovements = (target.movements || []).filter(m => m.id !== movementId);
+
+  const updatedAdvance = ensureAdvanceIntegrity({
+    ...target,
+    movements: updatedMovements,
+    updatedAt: new Date().toISOString(),
+  });
+
+  current[index] = updatedAdvance;
+  saveStoredSalaryAdvances(current);
+
+  return {
+    success: true,
+    advance: updatedAdvance,
+    advances: current,
+  };
 }
 
 export function deleteSalaryAdvance(
@@ -101,17 +272,19 @@ export function resetSalaryAdvancesDemo(): SalaryAdvance[] {
 export function exportSalaryAdvancesCSV(advances: SalaryAdvance[], monthFilter?: string): void {
   const headers = [
     'ID do Vale',
-    'Data de Entrega',
+    'Data da Concessão',
     'Mês Competência',
     'Colaborador',
     'Matrícula',
     'Cargo',
     'Departamento',
-    'Valor (R$)',
-    'Forma de Pagamento',
+    'Total Adiantado (R$)',
+    'Total Baixado (R$)',
+    'Saldo Devedor (R$)',
+    'Forma Principal',
     'Categoria / Finalidade',
-    'Status',
-    'Assinado Recibo',
+    'Status Atual',
+    'Nº Lançamentos',
     'Responsável Liberação',
     'Motivo / Descrição',
     'Observações'
@@ -127,7 +300,8 @@ export function exportSalaryAdvancesCSV(advances: SalaryAdvance[], monthFilter?:
 
   const statusLabel: Record<string, string> = {
     PENDENTE_DESCONTO: 'Pendente de Desconto em Folha',
-    DESCONTADO_FOLHA: 'Descontado em Folha',
+    PARCIALMENTE_BAIXADO: 'Parcialmente Baixado',
+    DESCONTADO_FOLHA: 'Totalmente Quitado / Descontado',
     CANCELADO: 'Cancelado'
   };
 
@@ -140,10 +314,12 @@ export function exportSalaryAdvancesCSV(advances: SalaryAdvance[], monthFilter?:
     adv.employeeRole,
     adv.employeeDepartment,
     (Number(adv.amount) || 0).toFixed(2).replace('.', ','),
+    (Number(adv.totalPaidAmount) || 0).toFixed(2).replace('.', ','),
+    (Number(adv.balanceAmount) || 0).toFixed(2).replace('.', ','),
     paymentLabel[adv.paymentMethod] || adv.paymentMethod,
     adv.category,
     statusLabel[adv.status] || adv.status,
-    adv.receiptSigned ? 'Sim' : 'Não',
+    (adv.movements?.length || 1).toString(),
     adv.approvedBy || '',
     adv.reason.replace(/;/g, ','),
     (adv.notes || '').replace(/;/g, ',')

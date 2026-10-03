@@ -14,22 +14,31 @@ import {
   ChevronDown,
   Sparkles,
   Database,
-  Receipt
+  Receipt,
+  ReceiptText,
+  Trash2,
+  UserCog,
+  LogOut,
+  User
 } from 'lucide-react';
 import { CompanySettings } from '../utils/companySettings';
+import { AuthUser } from '../types/auth';
 
 interface NavbarProps {
-  currentTab: 'dashboard' | 'billing' | 'entry' | 'stock' | 'prices' | 'timeclock' | 'advances' | 'invoices' | 'reports';
-  onSelectTab: (tab: 'dashboard' | 'billing' | 'entry' | 'stock' | 'prices' | 'timeclock' | 'advances' | 'invoices' | 'reports') => void;
+  currentTab: 'dashboard' | 'billing' | 'expenses' | 'entry' | 'stock' | 'prices' | 'timeclock' | 'advances' | 'invoices' | 'reports' | 'users';
+  onSelectTab: (tab: 'dashboard' | 'billing' | 'expenses' | 'entry' | 'stock' | 'prices' | 'timeclock' | 'advances' | 'invoices' | 'reports' | 'users') => void;
   onResetDemo: () => void;
+  onClearAllData?: () => void;
   lowStockAlertsCount: number;
   companySettings: CompanySettings;
   onOpenCompanySettings: () => void;
   onOpenSupabaseSync?: () => void;
+  currentUser?: AuthUser | null;
+  onLogout?: () => void;
 }
 
 interface NavItem {
-  id: 'dashboard' | 'billing' | 'entry' | 'stock' | 'prices' | 'timeclock' | 'advances' | 'invoices' | 'reports';
+  id: 'dashboard' | 'billing' | 'expenses' | 'entry' | 'stock' | 'prices' | 'timeclock' | 'advances' | 'invoices' | 'reports' | 'users';
   label: string;
   icon: React.ElementType;
   badge?: number;
@@ -40,16 +49,20 @@ export const Navbar: React.FC<NavbarProps> = ({
   currentTab,
   onSelectTab,
   onResetDemo,
+  onClearAllData,
   lowStockAlertsCount,
   companySettings,
   onOpenCompanySettings,
   onOpenSupabaseSync,
+  currentUser,
+  onLogout,
 }) => {
   const [logoLoadError, setLogoLoadError] = useState(false);
 
   const navItems: NavItem[] = [
     { id: 'dashboard', label: 'Painel', icon: LayoutDashboard },
     { id: 'billing', label: 'Faturamento', icon: Receipt, accent: true },
+    { id: 'expenses', label: 'Despesas', icon: ReceiptText },
     { id: 'entry', label: 'Entrada NF-e', icon: FileInput },
     {
       id: 'stock',
@@ -62,6 +75,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     { id: 'advances', label: 'Vales', icon: Banknote },
     { id: 'invoices', label: 'Notas', icon: FileText },
     { id: 'reports', label: 'Relatórios', icon: FileBarChart },
+    { id: 'users', label: 'Usuários', icon: UserCog },
   ];
 
   return (
@@ -182,6 +196,17 @@ export const Navbar: React.FC<NavbarProps> = ({
               <Building2 className="w-4 h-4 text-indigo-600" />
             </button>
 
+            {onClearAllData && (
+              <button
+                onClick={onClearAllData}
+                title="Apagar todos os dados preenchidos e zerar para iniciar a partir de hoje"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-rose-600 hover:text-rose-800 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer border border-rose-200/70 font-semibold"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                <span className="hidden xl:inline text-[11px]">Zerar Dados</span>
+              </button>
+            )}
+
             <button
               onClick={onResetDemo}
               title="Restaurar dados de exemplo do sistema"
@@ -193,10 +218,48 @@ export const Navbar: React.FC<NavbarProps> = ({
 
             <div className="h-4 w-px bg-slate-200 hidden sm:block" />
 
-            <div className="hidden sm:flex items-center gap-1.5 text-[11px] text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-md border border-emerald-200 font-semibold font-mono">
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-              <span>SEFAZ 4.00</span>
-            </div>
+            {/* Usuário Logado e Botão de Sair / Logout */}
+            {currentUser && (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => onSelectTab('users')}
+                  title="Acessar Gestão de Usuários e Permissões"
+                  className="flex items-center gap-2 bg-slate-50 hover:bg-slate-100 border border-slate-200/90 rounded-xl px-2.5 py-1.5 shadow-2xs transition-colors cursor-pointer text-left"
+                >
+                  <div className={`w-6 h-6 rounded-lg flex items-center justify-center text-white text-[10px] font-black shrink-0 ${
+                    currentUser.role === 'ADMIN' ? 'bg-purple-600' : 'bg-blue-600'
+                  }`}>
+                    {currentUser.name.substring(0, 2).toUpperCase()}
+                  </div>
+                  <div className="hidden md:block leading-tight">
+                    <span className="block text-xs font-bold text-slate-800 max-w-[130px] truncate">
+                      {currentUser.name}
+                    </span>
+                    <span className="block text-[10px] text-slate-500 font-medium">
+                      {currentUser.role === 'ADMIN' ? 'Administrador' : 'Usuário Padrão'}
+                    </span>
+                  </div>
+                </button>
+
+                {onLogout && (
+                  <button
+                    onClick={onLogout}
+                    title="Encerrar sessão com segurança (Logout)"
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 active:scale-95 border border-rose-200 rounded-xl transition-all shadow-2xs cursor-pointer"
+                  >
+                    <LogOut className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Sair / Logout</span>
+                  </button>
+                )}
+              </div>
+            )}
+
+            {!currentUser && (
+              <div className="hidden sm:flex items-center gap-1.5 text-[11px] text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-md border border-emerald-200 font-semibold font-mono">
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                <span>SEFAZ 4.00</span>
+              </div>
+            )}
           </div>
         </div>
 

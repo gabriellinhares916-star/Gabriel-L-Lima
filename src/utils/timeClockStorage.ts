@@ -117,6 +117,9 @@ function generateSamplePunches(): TimePunch[] {
     '2026-09-16',
     '2026-09-17',
     '2026-09-18',
+    // Outubro / 2026
+    '2026-10-01',
+    '2026-10-02',
   ];
 
   INITIAL_EMPLOYEES.forEach((emp, empIdx) => {
@@ -555,10 +558,29 @@ export function calculateEmployeeMonthlyTimesheet(
     const dateObj = new Date(year, month - 1, day);
     const dayOfWeekIdx = dateObj.getDay();
     const dayOfWeekName = daysOfWeekNames[dayOfWeekIdx];
-    const isWeekend = dayOfWeekIdx === 0 || dayOfWeekIdx === 6;
+    const shiftLower = (employee.workShift || '').toLowerCase();
+    const isSaturdayWorkShift = (
+      shiftLower.includes('sábado') ||
+      shiftLower.includes('sabado') ||
+      shiftLower.includes('seg a sáb') ||
+      shiftLower.includes('seg a sab') ||
+      shiftLower.includes('segunda a sábado') ||
+      shiftLower.includes('segunda a sabado')
+    );
 
-    // Feriados nacionais padrão (ex: 07 de setembro)
-    const isHoliday = (month === 9 && day === 7) || (month === 1 && day === 1) || (month === 12 && day === 25);
+    const isSunday = dayOfWeekIdx === 0;
+    const isSaturday = dayOfWeekIdx === 6;
+    const isWeekday = dayOfWeekIdx >= 1 && dayOfWeekIdx <= 5;
+
+    // Feriados nacionais padrão (ex: 01/Jan, 21/Abr, 01/Mai, 07/Set, 12/Out, 02/Nov, 15/Nov, 20/Nov, 25/Dez)
+    const isHoliday =
+      (month === 1 && day === 1) ||
+      (month === 4 && day === 21) ||
+      (month === 5 && day === 1) ||
+      (month === 9 && day === 7) ||
+      (month === 10 && day === 12) ||
+      (month === 11 && (day === 2 || day === 15 || day === 20)) ||
+      (month === 12 && day === 25);
 
     // Batidas do dia
     const dayPunches = allPunches
@@ -587,16 +609,38 @@ export function calculateEmployeeMonthlyTimesheet(
       workedMinutes = Math.max(0, timeToMinutes(exit2) - timeToMinutes(entry1) - 60); // desconta 1h almoço
     }
 
-    // Horas esperadas
-    const expectedHours = (!isWeekend && !isHoliday) ? employee.dailyHoursExpected : 0;
-    const expectedMinutes = expectedHours * 60;
+    // Horas esperadas conforme a jornada do colaborador
+    let expectedHours = 0;
+    let isDayOff = false;
 
+    if (isHoliday) {
+      expectedHours = 0;
+      isDayOff = true;
+    } else if (isSunday) {
+      expectedHours = 0;
+      isDayOff = true;
+    } else if (isSaturday) {
+      if (isSaturdayWorkShift) {
+        // Segunda a sábado: 4 horas líquidas no sábado!
+        expectedHours = 4.0;
+        isDayOff = false;
+      } else {
+        expectedHours = 0;
+        isDayOff = true;
+      }
+    } else if (isWeekday) {
+      // Segunda a sexta: 8 horas líquidas (ou dailyHoursExpected configurada)
+      expectedHours = employee.dailyHoursExpected || 8.0;
+      isDayOff = false;
+    }
+
+    const expectedMinutes = expectedHours * 60;
     const balanceMinutes = workedMinutes - expectedMinutes;
 
     let status: DayWorkStatus = 'NORMAL';
     if (isHoliday) {
       status = 'FERIADO';
-    } else if (isWeekend) {
+    } else if (isDayOff) {
       status = workedMinutes > 0 ? 'HORA_EXTRA' : 'FOLGA_DSR';
     } else if (workedMinutes === 0 && dayPunches.length === 0) {
       // Se a data já passou no mês
@@ -778,4 +822,104 @@ export function exportConsolidatedTimeClockCSV(
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
+}
+
+/**
+ * Nomes dos meses em português
+ */
+export const TIMECLOCK_MONTH_NAMES_PT = [
+  'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+];
+
+/**
+ * Retorna o mês corrente no formato YYYY-MM (ex: "2026-10")
+ */
+export function getCurrentCompetenceMonth(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  return `${y}-${m}`;
+}
+
+/**
+ * Formata "2026-10" como "Outubro / 2026"
+ */
+export function formatCompetenceMonth(yearMonth: string): string {
+  if (!yearMonth) return '';
+  const [yStr, mStr] = yearMonth.split('-');
+  const y = Number(yStr);
+  const m = Number(mStr);
+  if (!y || !m || m < 1 || m > 12) return yearMonth;
+  return `${TIMECLOCK_MONTH_NAMES_PT[m - 1]} / ${y}`;
+}
+
+/**
+ * Desloca a competência em N meses (ex: "2026-10" + 1 => "2026-11", "2026-12" + 1 => "2027-01")
+ */
+export function shiftCompetenceMonth(yearMonth: string, offsetMonths: number): string {
+  const [yStr, mStr] = (yearMonth || getCurrentCompetenceMonth()).split('-');
+  const y = Number(yStr) || new Date().getFullYear();
+  const m = Number(mStr) || (new Date().getMonth() + 1);
+  const targetDate = new Date(y, (m - 1) + offsetMonths, 1);
+  const targetY = targetDate.getFullYear();
+  const targetM = String(targetDate.getMonth() + 1).padStart(2, '0');
+  return `${targetY}-${targetM}`;
+}
+
+export interface CompetenceMonthOption {
+  value: string; // "2026-10"
+  label: string; // "Outubro / 2026"
+  year: number;
+  month: number;
+  isCurrent: boolean;
+  isSubsequent: boolean;
+}
+
+/**
+ * Retorna lista completa de meses (passados, atual e subsequentes até 2027/2028),
+ * além de quaisquer meses com batidas registradas.
+ */
+export function getTimeClockAvailableMonths(punches?: TimePunch[]): CompetenceMonthOption[] {
+  const current = getCurrentCompetenceMonth();
+  const [currY, currM] = current.split('-').map(Number);
+  const monthsSet = new Set<string>();
+
+  // Abranger de 2025 até 2027 (e 2028 se aplicável)
+  const startYear = Math.min(2025, currY - 1);
+  const endYear = Math.max(2027, currY + 1);
+
+  for (let yr = startYear; yr <= endYear; yr++) {
+    for (let mo = 1; mo <= 12; mo++) {
+      monthsSet.add(`${yr}-${String(mo).padStart(2, '0')}`);
+    }
+  }
+
+  // Adicionar meses presentes nas batidas registradas
+  if (punches && punches.length > 0) {
+    punches.forEach(p => {
+      if (p.date && p.date.length >= 7) {
+        monthsSet.add(p.date.substring(0, 7));
+      }
+    });
+  }
+
+  // Ordenar decrescente (ano e meses mais recentes / subsequentes primeiro)
+  const sorted = Array.from(monthsSet).sort().reverse();
+
+  return sorted.map(val => {
+    const [y, m] = val.split('-').map(Number);
+    const isCurrent = val === current;
+    const isSubsequent = (y > currY) || (y === currY && m > currM);
+    const label = `${TIMECLOCK_MONTH_NAMES_PT[m - 1]} / ${y}`;
+
+    return {
+      value: val,
+      label,
+      year: y,
+      month: m,
+      isCurrent,
+      isSubsequent,
+    };
+  });
 }

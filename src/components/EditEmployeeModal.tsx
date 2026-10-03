@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Employee } from '../types';
+import { DepartmentManagerModal } from './DepartmentManagerModal';
+import { getStoredDepartments } from '../utils/departmentStorage';
 import {
   User,
   Clock,
   Briefcase,
   Building,
+  Building2,
   KeyRound,
   X,
   Save,
@@ -35,6 +38,8 @@ export const EditEmployeeModal: React.FC<EditEmployeeModalProps> = ({
   const [cpf, setCpf] = useState<string>(employee.cpf);
   const [role, setRole] = useState<string>(employee.role);
   const [department, setDepartment] = useState<string>(employee.department);
+  const [availableDepartments, setAvailableDepartments] = useState<string[]>(getStoredDepartments);
+  const [isDeptManagerOpen, setIsDeptManagerOpen] = useState<boolean>(false);
   const [workShift, setWorkShift] = useState<string>(employee.workShift);
   const [dailyHoursExpected, setDailyHoursExpected] = useState<number>(employee.dailyHoursExpected);
   const [pin, setPin] = useState<string>(employee.pin);
@@ -48,6 +53,7 @@ export const EditEmployeeModal: React.FC<EditEmployeeModalProps> = ({
     setCpf(employee.cpf);
     setRole(employee.role);
     setDepartment(employee.department);
+    setAvailableDepartments(getStoredDepartments());
     setWorkShift(employee.workShift);
     setDailyHoursExpected(employee.dailyHoursExpected);
     setPin(employee.pin);
@@ -89,12 +95,16 @@ export const EditEmployeeModal: React.FC<EditEmployeeModalProps> = ({
   };
 
   const presetShifts = [
-    { label: '08:00 às 17:00 (Seg a Sex)', hours: 8.0 },
-    { label: '07:30 às 17:18 (Seg a Sex - 44h)', hours: 8.8 },
-    { label: '07:00 às 16:00 (Seg a Sex)', hours: 8.0 },
-    { label: '06:00 às 14:20 (Turno A)', hours: 7.33 },
-    { label: '14:00 às 22:20 (Turno B)', hours: 7.33 },
-    { label: '12x36 Diurno (07:00 às 19:00)', hours: 12.0 },
+    {
+      label: 'Seg a Sáb (Seg-Sex: 8h | Sáb: 4h líquidas - 44h)',
+      shiftText: 'Segunda a Sábado (Seg a Sex: 8h líquidas | Sáb: 4h líquidas - 44h)',
+      hours: 8.0,
+      highlight: true,
+    },
+    { label: '08:00 às 17:00 (Seg a Sex)', shiftText: '08:00 às 17:00 (Seg a Sex)', hours: 8.0 },
+    { label: '07:30 às 17:18 (Seg a Sex - 44h)', shiftText: '07:30 às 17:18 (Seg a Sex - 44h)', hours: 8.8 },
+    { label: '07:00 às 16:00 (Seg a Sex)', shiftText: '07:00 às 16:00 (Seg a Sex)', hours: 8.0 },
+    { label: '12x36 Diurno (07:00 às 19:00)', shiftText: '12x36 Diurno (07:00 às 19:00)', hours: 12.0 },
   ];
 
   return (
@@ -198,19 +208,37 @@ export const EditEmployeeModal: React.FC<EditEmployeeModalProps> = ({
             </div>
 
             <div>
-              <label className="block font-bold text-slate-700 mb-1">
-                Departamento *
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block font-bold text-slate-700">
+                  Departamento *
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setIsDeptManagerOpen(true)}
+                  className="text-[11px] text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-1 cursor-pointer transition-colors"
+                  title="Cadastrar novo departamento ou excluir existente"
+                >
+                  <Building2 className="w-3 h-3 text-indigo-600" />
+                  <span>+ Cadastrar / Excluir</span>
+                </button>
+              </div>
               <select
                 value={department}
-                onChange={(e) => setDepartment(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-xl bg-white"
+                onChange={(e) => {
+                  if (e.target.value === '__MANAGE__') {
+                    setIsDeptManagerOpen(true);
+                  } else {
+                    setDepartment(e.target.value);
+                  }
+                }}
+                className="w-full px-3 py-2 border border-slate-300 rounded-xl bg-white font-medium text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
               >
-                <option value="Almoxarifado & Estoque">Almoxarifado & Estoque</option>
-                <option value="Recebimento Fiscal">Recebimento Fiscal</option>
-                <option value="Estoque & Logística">Estoque & Logística</option>
-                <option value="Expedição & Armazém">Expedição & Armazém</option>
-                <option value="Faturamento & Controle">Faturamento & Controle</option>
+                {availableDepartments.map((d) => (
+                  <option key={d} value={d}>{d}</option>
+                ))}
+                <option value="__MANAGE__" className="text-indigo-600 font-bold bg-indigo-50">
+                  ⚙️ Gerenciar Departamentos (Cadastrar / Excluir)...
+                </option>
               </select>
             </div>
           </div>
@@ -232,7 +260,7 @@ export const EditEmployeeModal: React.FC<EditEmployeeModalProps> = ({
                   required
                   value={workShift}
                   onChange={(e) => setWorkShift(e.target.value)}
-                  placeholder="Ex: 08:00 às 17:00 (Segunda a Sexta)"
+                  placeholder="Ex: Segunda a Sábado (Seg a Sex: 8h líquidas | Sáb: 4h líquidas - 44h)"
                   className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl font-medium focus:ring-2 focus:ring-indigo-500"
                 />
               </div>
@@ -265,15 +293,27 @@ export const EditEmployeeModal: React.FC<EditEmployeeModalProps> = ({
                     key={idx}
                     type="button"
                     onClick={() => {
-                      setWorkShift(preset.label);
+                      setWorkShift(preset.shiftText || preset.label);
                       setDailyHoursExpected(preset.hours);
                     }}
-                    className="px-2 py-1 bg-white hover:bg-indigo-100 text-indigo-800 border border-indigo-200 rounded-lg text-[10px] font-medium transition-colors cursor-pointer"
+                    className={`px-2.5 py-1 rounded-lg border text-[10px] font-semibold transition-colors cursor-pointer ${
+                      preset.highlight
+                        ? 'bg-emerald-50 border-emerald-300 text-emerald-800 hover:bg-emerald-100 font-bold'
+                        : 'bg-white hover:bg-indigo-100 text-indigo-800 border-indigo-200'
+                    }`}
                   >
                     {preset.label}
                   </button>
                 ))}
               </div>
+
+              {/* Aviso informativo de jornada Seg a Sáb */}
+              {(workShift.toLowerCase().includes('sáb') || workShift.toLowerCase().includes('sab')) && (
+                <div className="mt-2 p-2 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] flex items-center gap-1.5 font-medium">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+                  <span>Jornada Seg a Sáb ativa: <strong>8 horas líquidas</strong> (Segunda a Sexta) e <strong>4 horas líquidas</strong> no sábado. Total: 44h semanais.</span>
+                </div>
+              )}
             </div>
           </div>
 
@@ -376,6 +416,15 @@ export const EditEmployeeModal: React.FC<EditEmployeeModalProps> = ({
           </div>
         </form>
       </div>
+
+      {/* Modal de Gerenciamento de Departamentos (Cadastrar e Excluir) */}
+      <DepartmentManagerModal
+        isOpen={isDeptManagerOpen}
+        onClose={() => setIsDeptManagerOpen(false)}
+        currentDepartment={department}
+        onSelectDepartment={(deptName) => setDepartment(deptName)}
+        onDepartmentsChange={(newDepts) => setAvailableDepartments(newDepts)}
+      />
     </div>
   );
 };

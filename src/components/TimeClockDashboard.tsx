@@ -14,9 +14,17 @@ import {
   Building,
   UserCheck,
   History,
-  UserPlus
+  UserPlus,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
-import { exportConsolidatedTimeClockCSV } from '../utils/timeClockStorage';
+import {
+  exportConsolidatedTimeClockCSV,
+  getCurrentCompetenceMonth,
+  formatCompetenceMonth,
+  shiftCompetenceMonth,
+  getTimeClockAvailableMonths
+} from '../utils/timeClockStorage';
 
 interface TimeClockDashboardProps {
   employees: Employee[];
@@ -68,7 +76,20 @@ export const TimeClockDashboard: React.FC<TimeClockDashboardProps> = ({
   const punchesToday = punches.filter(p => p.date === todayStr);
   const uniqueEmployeesToday = new Set(punchesToday.map(p => p.employeeId)).size;
 
-  const currentMonthStr = '2026-09';
+  const realCurrentMonth = React.useMemo(() => getCurrentCompetenceMonth(), []);
+  const [selectedCompetenceMonth, setSelectedCompetenceMonth] = useState<string>(() => realCurrentMonth);
+
+  const availableMonths = React.useMemo(() => {
+    return getTimeClockAvailableMonths(punches);
+  }, [punches]);
+
+  const handlePrevCompetence = () => {
+    setSelectedCompetenceMonth(prev => shiftCompetenceMonth(prev, -1));
+  };
+
+  const handleNextCompetence = () => {
+    setSelectedCompetenceMonth(prev => shiftCompetenceMonth(prev, 1));
+  };
 
   const handleNavigateToMirrorWithEmployee = (employeeId: string) => {
     setSelectedEmployeeForMirror(employeeId);
@@ -111,11 +132,11 @@ export const TimeClockDashboard: React.FC<TimeClockDashboardProps> = ({
             </button>
 
             <button
-              onClick={() => exportConsolidatedTimeClockCSV(employees, punches, currentMonthStr)}
+              onClick={() => exportConsolidatedTimeClockCSV(employees, punches, selectedCompetenceMonth)}
               className="flex items-center gap-2 px-4 py-2.5 bg-white/10 hover:bg-white/20 text-white text-xs font-bold rounded-xl transition-all border border-white/10 cursor-pointer"
             >
               <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
-              <span>Exportar Banco Geral (CSV)</span>
+              <span>Exportar Banco ({formatCompetenceMonth(selectedCompetenceMonth)})</span>
             </button>
           </div>
         </div>
@@ -165,16 +186,45 @@ export const TimeClockDashboard: React.FC<TimeClockDashboardProps> = ({
             <span className="text-[11px] font-bold uppercase tracking-wider text-blue-700">
               Competência Ativa
             </span>
-            <div className="p-1.5 rounded-lg bg-blue-50 text-blue-600">
-              <Calendar className="w-4 h-4" />
+            <div className="flex items-center gap-0.5">
+              <button
+                type="button"
+                onClick={handlePrevCompetence}
+                title="Competência Anterior"
+                className="p-1 rounded text-slate-400 hover:text-slate-800 hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={handleNextCompetence}
+                title="Competência Subsequente / Próxima"
+                className="p-1 rounded text-slate-400 hover:text-slate-800 hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+              <div className="p-1.5 rounded-lg bg-blue-50 text-blue-600 ml-1">
+                <Calendar className="w-4 h-4" />
+              </div>
             </div>
           </div>
-          <div className="text-xl font-black text-slate-900 mt-2">
-            Setembro / 2026
+          <div className="text-lg font-black text-slate-900 mt-2 truncate" title={formatCompetenceMonth(selectedCompetenceMonth)}>
+            {formatCompetenceMonth(selectedCompetenceMonth)}
           </div>
-          <span className="text-[11px] text-slate-400 mt-0.5 block">
-            Apuração mensal em curso
-          </span>
+          <div className="flex items-center justify-between mt-0.5">
+            <span className="text-[11px] text-slate-400 block">
+              {selectedCompetenceMonth === realCurrentMonth ? 'Mês atual em curso' : 'Competência selecionada'}
+            </span>
+            {selectedCompetenceMonth !== realCurrentMonth && (
+              <button
+                type="button"
+                onClick={() => setSelectedCompetenceMonth(realCurrentMonth)}
+                className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 hover:underline cursor-pointer"
+              >
+                Ir p/ Atual
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
@@ -252,6 +302,8 @@ export const TimeClockDashboard: React.FC<TimeClockDashboardProps> = ({
             selectedEmployeeId={selectedEmployeeForMirror}
             onSelectEmployee={setSelectedEmployeeForMirror}
             onNavigateToTerminal={() => setActiveSubTab('terminal')}
+            selectedMonth={selectedCompetenceMonth}
+            onChangeMonth={setSelectedCompetenceMonth}
             onUpdateDayPunches={onUpdateDayPunches}
             onClearDayPunches={onClearDayPunches}
           />
@@ -268,6 +320,8 @@ export const TimeClockDashboard: React.FC<TimeClockDashboardProps> = ({
             onSelectEmployeeForPunch={handleNavigateToPunchWithEmployee}
             isOpenAddModalExternally={openAddModalTrigger}
             onCloseExternalAddModal={() => setOpenAddModalTrigger(false)}
+            selectedCompetenceMonth={selectedCompetenceMonth}
+            onChangeCompetenceMonth={setSelectedCompetenceMonth}
           />
         )}
       </div>

@@ -7,6 +7,7 @@ interface AddEditExpenseModalProps {
   isOpen: boolean;
   onClose: () => void;
   expenseToEdit?: ExpenseRecord | null;
+  initialPreset?: Partial<ExpenseRecord> | null;
   onSave: (data: Omit<ExpenseRecord, 'id' | 'createdAt'>, editId?: string) => void;
 }
 
@@ -14,6 +15,7 @@ export const AddEditExpenseModal: React.FC<AddEditExpenseModalProps> = ({
   isOpen,
   onClose,
   expenseToEdit,
+  initialPreset,
   onSave,
 }) => {
   const [description, setDescription] = useState<string>('');
@@ -28,9 +30,11 @@ export const AddEditExpenseModal: React.FC<AddEditExpenseModalProps> = ({
   const [paymentDate, setPaymentDate] = useState<string>('');
   const [isRecurring, setIsRecurring] = useState<boolean>(true);
   const [notes, setNotes] = useState<string>('');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen) {
+      setErrorMessage(null);
       if (expenseToEdit) {
         setDescription(expenseToEdit.description);
         setCategory(expenseToEdit.category);
@@ -44,6 +48,20 @@ export const AddEditExpenseModal: React.FC<AddEditExpenseModalProps> = ({
         setPaymentDate(expenseToEdit.paymentDate || '');
         setIsRecurring(expenseToEdit.isRecurring ?? false);
         setNotes(expenseToEdit.notes || '');
+      } else if (initialPreset) {
+        const todayStr = new Date().toISOString().substring(0, 10);
+        setDescription(initialPreset.description || '');
+        setCategory(initialPreset.category || 'OUTRAS');
+        setAmount(initialPreset.amount ? initialPreset.amount.toString() : '50.00');
+        setDueDate(initialPreset.dueDate || todayStr);
+        setCompetenceMonth(todayStr.substring(0, 7));
+        setSupplierOrBeneficiary(initialPreset.supplierOrBeneficiary || '');
+        setPaymentMethod(initialPreset.paymentMethod || 'PIX');
+        setDocumentNumber(initialPreset.documentNumber || '');
+        setStatus(initialPreset.status || 'PENDENTE');
+        setPaymentDate(initialPreset.paymentDate || '');
+        setIsRecurring(initialPreset.isRecurring ?? false);
+        setNotes(initialPreset.notes || '');
       } else {
         const todayStr = new Date().toISOString().substring(0, 10);
         setDescription('');
@@ -60,25 +78,27 @@ export const AddEditExpenseModal: React.FC<AddEditExpenseModalProps> = ({
         setNotes('');
       }
     }
-  }, [isOpen, expenseToEdit]);
+  }, [isOpen, expenseToEdit, initialPreset]);
 
   if (!isOpen) return null;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorMessage(null);
+
     const numAmount = parseFloat(amount.replace(',', '.'));
     if (isNaN(numAmount) || numAmount <= 0) {
-      alert('Informe um valor de despesa válido maior que zero.');
+      setErrorMessage('Informe um valor de despesa válido maior que zero.');
       return;
     }
 
     if (!description.trim()) {
-      alert('Informe a descrição da despesa.');
+      setErrorMessage('Informe a descrição da despesa.');
       return;
     }
 
     if (!dueDate) {
-      alert('Informe a data de vencimento da despesa.');
+      setErrorMessage('Informe a data de vencimento da despesa.');
       return;
     }
 
@@ -130,6 +150,13 @@ export const AddEditExpenseModal: React.FC<AddEditExpenseModalProps> = ({
 
         {/* Formulário */}
         <form onSubmit={handleSubmit} className="p-5 space-y-4">
+          {errorMessage && (
+            <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+              <span>{errorMessage}</span>
+            </div>
+          )}
+
           {/* Descrição */}
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1">

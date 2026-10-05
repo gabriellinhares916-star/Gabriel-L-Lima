@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { Product, StockMovement, Invoice, Employee, TimePunch, SalaryAdvance, BillingRecord } from '../types';
+import { Product, StockMovement, Invoice, Employee, TimePunch, SalaryAdvance, BillingRecord, ExpenseRecord } from '../types';
 import { CompanySettings } from './companySettings';
 
 // Credenciais fornecidas pelo usuário
@@ -577,6 +577,41 @@ export async function syncBillingsToSupabase(billings: BillingRecord[]): Promise
     return true;
   } catch (err) {
     console.warn('Falha na sincronização de faturamentos:', err);
+    return false;
+  }
+}
+
+// Envia Despesas e Contas a Pagar para o Supabase
+export async function syncExpensesToSupabase(expenses: ExpenseRecord[]): Promise<boolean> {
+  if (!expenses || expenses.length === 0) return true;
+  try {
+    const payload = expenses.map(e => ({
+      id: e.id,
+      description: e.description,
+      category: e.category,
+      amount: e.amount,
+      due_date: e.dueDate,
+      payment_date: e.paymentDate || null,
+      payment_time: e.paymentTime || null,
+      competence_month: e.competenceMonth,
+      status: e.status,
+      payment_method: e.paymentMethod,
+      supplier_or_beneficiary: e.supplierOrBeneficiary || null,
+      document_number: e.documentNumber || null,
+      notes: e.notes || null,
+      is_recurring: e.isRecurring ?? false,
+      created_at: e.createdAt || new Date().toISOString(),
+      updated_at: e.updatedAt || new Date().toISOString(),
+    }));
+
+    const { error } = await supabase.from('expenses').upsert(payload, { onConflict: 'id' });
+    if (error) {
+      console.warn('Erro ao sincronizar despesas com Supabase:', error.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('Falha na sincronização de despesas:', err);
     return false;
   }
 }

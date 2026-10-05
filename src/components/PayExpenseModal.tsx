@@ -25,9 +25,11 @@ export const PayExpenseModal: React.FC<PayExpenseModalProps> = ({
   const [paymentTime, setPaymentTime] = useState<string>('');
   const [paymentMethod, setPaymentMethod] = useState<ExpensePaymentMethod>('BOLETO');
   const [notes, setNotes] = useState<string>('');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen) {
+      setErrorMessage(null);
       const now = new Date();
       setPaymentDate(now.toISOString().substring(0, 10));
       setPaymentTime(now.toTimeString().substring(0, 8));
@@ -40,8 +42,9 @@ export const PayExpenseModal: React.FC<PayExpenseModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorMessage(null);
     if (!paymentDate) {
-      alert('Informe a data do pagamento.');
+      setErrorMessage('Informe a data do pagamento.');
       return;
     }
 
@@ -97,6 +100,11 @@ export const PayExpenseModal: React.FC<PayExpenseModalProps> = ({
 
         {/* Formulário de Baixa */}
         <form onSubmit={handleSubmit} className="p-5 space-y-4">
+          {errorMessage && (
+            <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold">
+              {errorMessage}
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1">

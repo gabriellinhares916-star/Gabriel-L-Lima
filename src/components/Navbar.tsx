@@ -19,17 +19,19 @@ import {
   Trash2,
   UserCog,
   LogOut,
-  User
+  User,
+  Barcode
 } from 'lucide-react';
 import { CompanySettings } from '../utils/companySettings';
 import { AuthUser } from '../types/auth';
 
 interface NavbarProps {
-  currentTab: 'dashboard' | 'billing' | 'expenses' | 'entry' | 'stock' | 'prices' | 'timeclock' | 'advances' | 'invoices' | 'reports' | 'users';
-  onSelectTab: (tab: 'dashboard' | 'billing' | 'expenses' | 'entry' | 'stock' | 'prices' | 'timeclock' | 'advances' | 'invoices' | 'reports' | 'users') => void;
+  currentTab: 'dashboard' | 'billing' | 'expenses' | 'boletos' | 'entry' | 'stock' | 'prices' | 'timeclock' | 'advances' | 'invoices' | 'reports' | 'users';
+  onSelectTab: (tab: 'dashboard' | 'billing' | 'expenses' | 'boletos' | 'entry' | 'stock' | 'prices' | 'timeclock' | 'advances' | 'invoices' | 'reports' | 'users') => void;
   onResetDemo: () => void;
   onClearAllData?: () => void;
   lowStockAlertsCount: number;
+  pendingBoletosCount?: number;
   companySettings: CompanySettings;
   onOpenCompanySettings: () => void;
   onOpenSupabaseSync?: () => void;
@@ -38,7 +40,7 @@ interface NavbarProps {
 }
 
 interface NavItem {
-  id: 'dashboard' | 'billing' | 'expenses' | 'entry' | 'stock' | 'prices' | 'timeclock' | 'advances' | 'invoices' | 'reports' | 'users';
+  id: 'dashboard' | 'billing' | 'expenses' | 'boletos' | 'entry' | 'stock' | 'prices' | 'timeclock' | 'advances' | 'invoices' | 'reports' | 'users';
   label: string;
   icon: React.ElementType;
   badge?: number;
@@ -51,6 +53,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onResetDemo,
   onClearAllData,
   lowStockAlertsCount,
+  pendingBoletosCount = 0,
   companySettings,
   onOpenCompanySettings,
   onOpenSupabaseSync,
@@ -63,6 +66,12 @@ export const Navbar: React.FC<NavbarProps> = ({
     { id: 'dashboard', label: 'Painel', icon: LayoutDashboard },
     { id: 'billing', label: 'Faturamento', icon: Receipt, accent: true },
     { id: 'expenses', label: 'Despesas', icon: ReceiptText },
+    {
+      id: 'boletos',
+      label: 'Boletos',
+      icon: Barcode,
+      badge: pendingBoletosCount > 0 ? pendingBoletosCount : undefined,
+    },
     { id: 'entry', label: 'Entrada NF-e', icon: FileInput },
     {
       id: 'stock',

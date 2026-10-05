@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Product, StockMovement, Invoice, Employee, TimePunch } from '../types';
+import { Product, StockMovement, Invoice, Employee, TimePunch, ExpenseRecord, InvoiceBoleto } from '../types';
 import { formatBRL, formatDateBR } from '../utils/stockCalculations';
 import { CompanySettings } from '../utils/companySettings';
 import {
@@ -30,7 +30,8 @@ import {
   UserCheck,
   Users,
   Activity,
-  Layers
+  Layers,
+  Barcode
 } from 'lucide-react';
 import { MovementsBarChart } from './MovementsBarChart';
 import { BillingBarChart } from './BillingBarChart';
@@ -44,8 +45,10 @@ interface DashboardProps {
   billings?: BillingRecord[];
   employees?: Employee[];
   punches?: TimePunch[];
+  expenses?: ExpenseRecord[];
+  boletos?: InvoiceBoleto[];
   companySettings: CompanySettings;
-  onNavigate: (tab: 'dashboard' | 'billing' | 'expenses' | 'entry' | 'stock' | 'prices' | 'timeclock' | 'advances' | 'invoices' | 'reports' | 'users') => void;
+  onNavigate: (tab: 'dashboard' | 'billing' | 'expenses' | 'boletos' | 'entry' | 'stock' | 'prices' | 'timeclock' | 'advances' | 'invoices' | 'reports' | 'users') => void;
   onOpenDanfe: (invoice: Invoice) => void;
   onOpenCompanySettings?: () => void;
   onOpenSupabaseSync?: () => void;
@@ -58,6 +61,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   billings = [],
   employees = [],
   punches = [],
+  expenses = [],
+  boletos = [],
   companySettings,
   onNavigate,
   onOpenDanfe,
@@ -96,6 +101,20 @@ export const Dashboard: React.FC<DashboardProps> = ({
       0
     );
   }, [dayBillings]);
+
+  // Despesas Pagas no Dia Selecionado
+  const dayPaidExpenses = useMemo(() => {
+    return expenses.filter(e => e.status === 'PAGA' && e.paymentDate === selectedDayDate);
+  }, [expenses, selectedDayDate]);
+
+  const dayPaidExpensesTotal = useMemo(() => {
+    return dayPaidExpenses.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+  }, [dayPaidExpenses]);
+
+  // Saldo Líquido Operacional do Dia (Faturamento - Despesas Pagas)
+  const dayNetOperationalBalance = useMemo(() => {
+    return dayBillingTotal - dayPaidExpensesTotal;
+  }, [dayBillingTotal, dayPaidExpensesTotal]);
 
   // Movimentações de Estoque do Dia Selecionado
   const dayMovements = useMemo(() => {
@@ -509,6 +528,47 @@ export const Dashboard: React.FC<DashboardProps> = ({
               </button>
             </div>
           </div>
+        </div>
+
+        {/* Fechamento Financeiro Operacional do Dia: Faturamento vs Despesas Pagas */}
+        <div className="mt-4 pt-4 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50/80 p-3.5 rounded-xl border border-slate-200/70">
+          <div className="flex flex-wrap items-center gap-3 sm:gap-4 text-xs">
+            <span className="font-extrabold text-slate-700 uppercase tracking-wider text-[11px] flex items-center gap-1.5">
+              <DollarSign className="w-4 h-4 text-indigo-600" />
+              Resultado Operacional do Dia:
+            </span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-slate-500">Faturamento:</span>
+              <strong className="text-emerald-700 font-mono font-bold">{formatBRL(dayBillingTotal)}</strong>
+            </div>
+            <span className="text-slate-300">•</span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-slate-500">Despesas Pagas:</span>
+              <strong className="text-rose-700 font-mono font-bold">{formatBRL(dayPaidExpensesTotal)}</strong>
+            </div>
+            <span className="text-slate-300">•</span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-slate-500">Saldo Líquido:</span>
+              <strong
+                className={`font-mono font-black text-sm px-2 py-0.5 rounded-md ${
+                  dayNetOperationalBalance >= 0
+                    ? 'bg-emerald-100 text-emerald-800'
+                    : 'bg-rose-100 text-rose-800'
+                }`}
+              >
+                {formatBRL(dayNetOperationalBalance)}
+              </strong>
+            </div>
+          </div>
+
+          <button
+            onClick={() => onNavigate('expenses')}
+            className="self-start sm:self-auto flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-bold transition-colors cursor-pointer shrink-0"
+          >
+            <ReceiptText className="w-3.5 h-3.5" />
+            <span>Gerenciar Despesas</span>
+            <ChevronRight className="w-3.5 h-3.5" />
+          </button>
         </div>
       </div>
 

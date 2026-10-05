@@ -1,7 +1,8 @@
 import React, { useState, useRef } from 'react';
-import { Invoice, InvoiceItem, Product } from '../types';
+import { Invoice, InvoiceItem, Product, InvoiceDestination, InvoiceBoleto } from '../types';
 import { parseNFeXML, SAMPLE_NFE_XML_1, SAMPLE_NFE_XML_2 } from '../utils/xmlParser';
 import { formatBRL, formatDateBR } from '../utils/stockCalculations';
+import { formatBarcodeDisplay } from '../utils/boletoStorage';
 import { DanfeModal } from './DanfeModal';
 import {
   Upload,
@@ -20,8 +21,25 @@ import {
   KeyRound,
   TrendingUp,
   Tag,
-  Sliders
+  Sliders,
+  Barcode,
+  MapPin,
+  Copy,
+  Check,
+  Split,
+  Layers,
+  Clock
 } from 'lucide-react';
+
+interface ManualBoletoDraft {
+  id: string;
+  barcode: string;
+  amount: number;
+  dueDate: string;
+  installmentNumber: number;
+  totalInstallments: number;
+  notes?: string;
+}
 
 interface InvoiceEntryProps {
   products: Product[];
@@ -47,11 +65,17 @@ export const InvoiceEntry: React.FC<InvoiceEntryProps> = ({
   // Formulário Manual State
   const [manualNumber, setManualNumber] = useState('');
   const [manualSeries, setManualSeries] = useState('1');
+  const [manualAccessKey, setManualAccessKey] = useState('');
+  const [manualDestination, setManualDestination] = useState<InvoiceDestination>('PARNARAMA');
   const [manualSupplierName, setManualSupplierName] = useState('');
   const [manualSupplierCnpj, setManualSupplierCnpj] = useState('');
-  const [manualSupplierUf, setManualSupplierUf] = useState('SP');
+  const [manualSupplierUf, setManualSupplierUf] = useState('MA');
   const [manualIssueDate, setManualIssueDate] = useState(new Date().toISOString().substring(0, 10));
   const [manualEntryDate, setManualEntryDate] = useState(new Date().toISOString().substring(0, 10));
+  const [hasBoletos, setHasBoletos] = useState(false);
+  const [manualBoletos, setManualBoletos] = useState<ManualBoletoDraft[]>([]);
+  const [copiedBarcodeId, setCopiedBarcodeId] = useState<string | null>(null);
+
   const [manualItems, setManualItems] = useState<InvoiceItem[]>([
     {
       id: 'item-1',
@@ -270,6 +294,112 @@ export const InvoiceEntry: React.FC<InvoiceEntryProps> = ({
     setManualItems(updated);
   };
 
+  // Gerar chave de acesso automática da NF-e (44 dígitos)
+  const handleGenerateRandomAccessKey = () => {
+    const ufCode = manualDestination === 'PARNARAMA' ? '21' : '22'; // 21 MA, 22 PI
+    const yy = (manualIssueDate || new Date().toISOString()).substring(2, 4);
+    const mm = (manualIssueDate || new Date().toISOString()).substring(5, 7);
+    const cleanCnpj = (manualSupplierCnpj || '12345678000190').replace(/\D/g, '').padEnd(14, '0').slice(0, 14);
+    const mod = '55';
+    const ser = (manualSeries || '1').padStart(3, '0');
+    const num = (manualNumber || '1').replace(/\D/g, '').padStart(9, '0');
+    const tpEmis = '1';
+    const cNF = Math.floor(10000000 + Math.random() * 90000000).toString();
+    const raw43 = `${ufCode}${yy}${mm}${cleanCnpj}${mod}${ser}${num}${tpEmis}${cNF}`;
+    const dv = (raw43.split('').reduce((acc, c, i) => acc + Number(c) * ((i % 8) + 2), 0) % 11) % 10;
+    const finalKey = `${raw43}${dv}`;
+    setManualAccessKey(finalKey);
+  };
+
+  // Gerar parcelas rápidas de boletos
+  const handleQuickInstallments = (count: number) => {
+    const totalProd = manualItems.reduce((acc, it) => acc + it.totalPrice, 0);
+    const baseAmount = Number((totalProd / count).toFixed(2));
+    const drafts: ManualBoletoDraft[] = [];
+    const baseDate = new Date(manualIssueDate || new Date());
+
+    let accumulated = 0;
+    for (let i = 1; i <= count; i++) {
+      const dueDate = new Date(baseDate);
+      dueDate.setDate(dueDate.getDate() + (i * 30));
+      const dateStr = dueDate.toISOString().substring(0, 10);
+      
+      const installmentAmount = (i === count)
+        ? Number((totalProd - accumulated).toFixed(2))
+        : baseAmount;
+      accumulated += installmentAmount;
+
+      drafts.push({
+        id: `draft-bol-${Date.now()}-${i}`,
+        barcode: '',
+        amount: Math.max(0, installmentAmount),
+        dueDate: dateStr,
+        installmentNumber: i,
+        totalInstallments: count,
+        notes: `Parcela ${i}/${count}`,
+      });
+    }
+
+    setManualBoletos(drafts);
+    setHasBoletos(true);
+  };
+
+  const handleAddManualBoleto = () => {
+    const totalProd = manualItems.reduce((acc, it) => acc + it.totalPrice, 0);
+    const totalCurrentBoletos = manualBoletos.reduce((acc, b) => acc + b.amount, 0);
+    const remaining = Math.max(0, Number((totalProd - totalCurrentBoletos).toFixed(2)));
+    const newIdx = manualBoletos.length + 1;
+
+    const nextDueDate = new Date();
+    nextDueDate.setDate(nextDueDate.getDate() + (newIdx * 30));
+
+    const updated = [
+      ...manualBoletos,
+      {
+        id: `draft-bol-${Date.now()}-${newIdx}`,
+        barcode: '',
+        amount: remaining > 0 ? remaining : 0,
+        dueDate: nextDueDate.toISOString().substring(0, 10),
+        installmentNumber: newIdx,
+        totalInstallments: newIdx,
+        notes: `Parcela ${newIdx}`,
+      },
+    ];
+
+    const recalculated = updated.map(b => ({
+      ...b,
+      totalInstallments: updated.length,
+    }));
+
+    setManualBoletos(recalculated);
+    setHasBoletos(true);
+  };
+
+  const handleUpdateManualBoleto = (index: number, field: keyof ManualBoletoDraft, value: any) => {
+    const updated = [...manualBoletos];
+    const item = { ...updated[index] };
+    if (field === 'amount') {
+      item.amount = parseFloat(value) || 0;
+    } else {
+      (item as any)[field] = value;
+    }
+    updated[index] = item;
+    setManualBoletos(updated);
+  };
+
+  const handleRemoveManualBoleto = (index: number) => {
+    const filtered = manualBoletos.filter((_, i) => i !== index);
+    const updated = filtered.map((b, idx) => ({
+      ...b,
+      installmentNumber: idx + 1,
+      totalInstallments: filtered.length,
+    }));
+    setManualBoletos(updated);
+    if (updated.length === 0) {
+      setHasBoletos(false);
+    }
+  };
+
   const handleManualSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setParseError(null);
@@ -289,12 +419,42 @@ export const InvoiceEntry: React.FC<InvoiceEntryProps> = ({
       return;
     }
 
+    // Validação de boletos se ativado
+    if (hasBoletos && manualBoletos.length > 0) {
+      const invalidBoleto = manualBoletos.find(b => b.amount <= 0 || !b.dueDate);
+      if (invalidBoleto) {
+        setParseError('Todos os boletos adicionados precisam ter valor maior que zero e data de vencimento preenchida.');
+        return;
+      }
+    }
+
     const totalProd = manualItems.reduce((acc, it) => acc + it.totalPrice, 0);
+
+    const cleanAccessKey = manualAccessKey.replace(/\D/g, '').trim();
+    const finalAccessKey = cleanAccessKey.length === 44
+      ? cleanAccessKey
+      : `3526${Date.now()}000199550010000${manualNumber.padStart(6, '0')}1`.slice(0, 44).padEnd(44, '0');
+
+    const builtBoletos: InvoiceBoleto[] = hasBoletos ? manualBoletos.map((b, idx) => ({
+      id: `bol-${Date.now()}-${idx}`,
+      barcode: b.barcode.trim(),
+      amount: b.amount,
+      dueDate: b.dueDate,
+      installmentNumber: b.installmentNumber || idx + 1,
+      totalInstallments: manualBoletos.length,
+      destinationBranch: manualDestination,
+      supplierName: manualSupplierName.trim(),
+      supplierCnpj: manualSupplierCnpj.trim(),
+      status: 'PENDENTE',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    })) : [];
 
     const invoice: Omit<Invoice, 'id' | 'createdAt' | 'status'> = {
       number: manualNumber.trim(),
       series: manualSeries.trim() || '1',
-      accessKey: `3526${Date.now()}000199550010000${manualNumber.padStart(6, '0')}1`.slice(0, 44).padEnd(44, '0'),
+      accessKey: finalAccessKey,
+      destinationBranch: manualDestination,
       issueDate: manualIssueDate,
       entryDate: manualEntryDate,
       supplier: {
@@ -303,9 +463,9 @@ export const InvoiceEntry: React.FC<InvoiceEntryProps> = ({
         uf: manualSupplierUf,
       },
       recipient: {
-        name: 'Sua Empresa Ltda',
+        name: manualDestination === 'PARNARAMA' ? 'Empresa - Filial Parnarama (MA)' : 'Empresa - Filial Teresina (PI)',
         cnpj: '12.345.678/0001-90',
-        uf: 'SP',
+        uf: manualDestination === 'PARNARAMA' ? 'MA' : 'PI',
       },
       items: manualItems,
       totals: {
@@ -315,7 +475,8 @@ export const InvoiceEntry: React.FC<InvoiceEntryProps> = ({
         discountValue: 0,
         totalInvoiceValue: totalProd,
       },
-      notes: 'Entrada registrada via digitação manual no sistema',
+      boletos: builtBoletos,
+      notes: `Entrada registrada via digitação manual no sistema - Destino: ${manualDestination}${builtBoletos.length > 0 ? ` (${builtBoletos.length} boletos gerados)` : ''}`,
     };
 
     setStagedInvoice(invoice);
@@ -328,7 +489,9 @@ export const InvoiceEntry: React.FC<InvoiceEntryProps> = ({
     onConfirmEntry(stagedInvoice);
     const invoiceNumber = stagedInvoice.number;
     const itemsCount = stagedInvoice.items.length;
-    setSuccessMessage(`Nota Fiscal nº ${invoiceNumber} confirmada com sucesso! ${itemsCount} itens deram entrada no estoque.`);
+    const boletosCount = stagedInvoice.boletos?.length || 0;
+    const dest = stagedInvoice.destinationBranch || 'PARNARAMA';
+    setSuccessMessage(`Nota Fiscal nº ${invoiceNumber} confirmada com sucesso! ${itemsCount} itens deram entrada no estoque de ${dest}${boletosCount > 0 ? ` e ${boletosCount} boleto(s) cadastrados na gestão financeira` : ''}.`);
     setStagedInvoice(null);
     setXmlText('');
   };
@@ -499,9 +662,128 @@ export const InvoiceEntry: React.FC<InvoiceEntryProps> = ({
       {/* SEÇÃO MANUAL ENTRY */}
       {!stagedInvoice && activeMode === 'manual' && (
         <form onSubmit={handleManualSubmit} className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs space-y-6">
-          <div className="border-b border-slate-200 pb-3">
-            <h3 className="font-semibold text-slate-800 text-sm">Dados da Nota Fiscal</h3>
-            <p className="text-xs text-slate-500">Preencha os dados do documento fiscal de entrada</p>
+          <div className="border-b border-slate-200 pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <h3 className="font-semibold text-slate-800 text-sm">Dados da Nota Fiscal</h3>
+              <p className="text-xs text-slate-500">Preencha os dados do documento fiscal de entrada e destino da mercadoria</p>
+            </div>
+            <span className="text-[11px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2.5 py-1 rounded-full self-start sm:self-auto">
+              Entrada Manual com Gestão de Boletos
+            </span>
+          </div>
+
+          {/* SELEÇÃO DO DESTINO DA NOTA (PARNARAMA OU TERESINA) */}
+          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/90 space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-bold text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
+                <MapPin className="w-4 h-4 text-indigo-600" />
+                Destino da Nota Fiscal / Filial de Entrada *
+              </label>
+              <span className="text-[11px] text-slate-500">Selecione para qual unidade esta mercadoria se destina</span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+              <button
+                type="button"
+                onClick={() => setManualDestination('PARNARAMA')}
+                className={`p-3.5 rounded-xl border-2 text-left transition-all flex items-center justify-between ${
+                  manualDestination === 'PARNARAMA'
+                    ? 'border-blue-600 bg-blue-50/80 text-blue-950 shadow-xs ring-2 ring-blue-500/20'
+                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50/80'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                    manualDestination === 'PARNARAMA' ? 'border-blue-600 bg-blue-600' : 'border-slate-400'
+                  }`}>
+                    {manualDestination === 'PARNARAMA' && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                  </div>
+                  <div>
+                    <div className="text-sm font-bold flex items-center gap-1.5">
+                      PARNARAMA
+                      <span className="text-[10px] px-1.5 py-0.2 bg-blue-200/70 text-blue-900 rounded font-bold">MA</span>
+                    </div>
+                    <div className="text-xs text-slate-500">Unidade e estoque Parnarama (Maranhão)</div>
+                  </div>
+                </div>
+                {manualDestination === 'PARNARAMA' && (
+                  <CheckCircle2 className="w-5 h-5 text-blue-600 shrink-0" />
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setManualDestination('TERESINA')}
+                className={`p-3.5 rounded-xl border-2 text-left transition-all flex items-center justify-between ${
+                  manualDestination === 'TERESINA'
+                    ? 'border-teal-600 bg-teal-50/80 text-teal-950 shadow-xs ring-2 ring-teal-500/20'
+                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50/80'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                    manualDestination === 'TERESINA' ? 'border-teal-600 bg-teal-600' : 'border-slate-400'
+                  }`}>
+                    {manualDestination === 'TERESINA' && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                  </div>
+                  <div>
+                    <div className="text-sm font-bold flex items-center gap-1.5">
+                      TERESINA
+                      <span className="text-[10px] px-1.5 py-0.2 bg-teal-200/70 text-teal-900 rounded font-bold">PI</span>
+                    </div>
+                    <div className="text-xs text-slate-500">Unidade e estoque Teresina (Piauí)</div>
+                  </div>
+                </div>
+                {manualDestination === 'TERESINA' && (
+                  <CheckCircle2 className="w-5 h-5 text-teal-600 shrink-0" />
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* CHAVE DE ACESSO DA NF-E (44 DÍGITOS) */}
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-2">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+              <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5 uppercase tracking-wide">
+                <KeyRound className="w-4 h-4 text-indigo-600" />
+                Chave de Acesso da NF-e (44 dígitos)
+              </label>
+              <div className="flex items-center gap-2">
+                <span className={`text-[11px] font-mono font-bold px-2 py-0.5 rounded ${
+                  manualAccessKey.replace(/\D/g, '').length === 44
+                    ? 'bg-emerald-100 text-emerald-800'
+                    : manualAccessKey.replace(/\D/g, '').length > 0
+                    ? 'bg-amber-100 text-amber-800'
+                    : 'bg-slate-100 text-slate-600'
+                }`}>
+                  {manualAccessKey.replace(/\D/g, '').length === 44
+                    ? '44/44 dígitos (Chave Completa)'
+                    : `${manualAccessKey.replace(/\D/g, '').length} / 44 dígitos`}
+                </span>
+                <button
+                  type="button"
+                  onClick={handleGenerateRandomAccessKey}
+                  className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg transition-colors shadow-2xs"
+                  title="Gerar automaticamente uma chave válida para teste ou caso não tenha a chave em mãos"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                  Gerar Chave Automática
+                </button>
+              </div>
+            </div>
+
+            <div className="relative">
+              <input
+                type="text"
+                placeholder="Cole ou digite os 44 dígitos da chave de acesso impressa no DANFE da nota..."
+                value={manualAccessKey}
+                onChange={(e) => setManualAccessKey(e.target.value.replace(/[^0-9]/g, '').slice(0, 44))}
+                className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-xs font-mono font-medium tracking-wider text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
+              />
+            </div>
+            <p className="text-[11px] text-slate-400">
+              Dica: Você pode copiar e colar a chave diretamente do PDF ou DANFE da nota. Se deixar em branco, o sistema gerará uma chave referencial automaticamente.
+            </p>
           </div>
 
           {/* Dados Cabeçalho NF */}
@@ -755,12 +1037,245 @@ export const InvoiceEntry: React.FC<InvoiceEntryProps> = ({
 
             <div className="flex justify-end p-3 bg-slate-50 rounded-lg border border-slate-200">
               <div className="text-right">
-                <span className="text-xs text-slate-500 font-medium">Valor Total da Nota: </span>
+                <span className="text-xs text-slate-500 font-medium">Valor Total dos Produtos: </span>
                 <span className="text-base font-bold text-indigo-700 ml-2">
                   {formatBRL(manualItems.reduce((acc, it) => acc + it.totalPrice, 0))}
                 </span>
               </div>
             </div>
+          </div>
+
+          {/* SEÇÃO: BOLETOS / CONTAS A PAGAR VINCULADAS */}
+          <div className="bg-slate-50 rounded-xl border border-slate-200 p-5 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-lg bg-indigo-600 text-white shadow-2xs">
+                  <Barcode className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                    Boletos & Contas a Pagar Vinculadas
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-200 text-slate-700">
+                      Opcional
+                    </span>
+                  </h4>
+                  <p className="text-xs text-slate-500">
+                    Cadastre os boletos para controlar vencimentos, código de barras e dar baixa no internet banking ({manualDestination}).
+                  </p>
+                </div>
+              </div>
+
+              {/* Toggle Has Boletos */}
+              <div className="flex items-center gap-2 self-start sm:self-auto">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!hasBoletos) {
+                      setHasBoletos(true);
+                      if (manualBoletos.length === 0) {
+                        handleQuickInstallments(1);
+                      }
+                    } else {
+                      setHasBoletos(false);
+                    }
+                  }}
+                  className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all border ${
+                    hasBoletos
+                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
+                      : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                  }`}
+                >
+                  <Barcode className="w-4 h-4" />
+                  {hasBoletos ? 'Boletos Ativados' : 'Adicionar Boletos a esta Nota'}
+                </button>
+              </div>
+            </div>
+
+            {hasBoletos && (
+              <div className="space-y-4 animate-fadeIn">
+                {/* Quick Generator Toolbar */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-white p-3 rounded-lg border border-slate-200 text-xs">
+                  <div className="flex items-center gap-1.5 text-slate-600 font-medium">
+                    <Sparkles className="w-4 h-4 text-amber-500" />
+                    <span>Gerar parcelas automáticas:</span>
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => handleQuickInstallments(1)}
+                      className="px-2.5 py-1 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-700 rounded text-xs font-semibold text-slate-700 transition-colors border border-slate-200"
+                    >
+                      1x Integral (30d)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleQuickInstallments(2)}
+                      className="px-2.5 py-1 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-700 rounded text-xs font-semibold text-slate-700 transition-colors border border-slate-200"
+                    >
+                      2x (30 e 60d)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleQuickInstallments(3)}
+                      className="px-2.5 py-1 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-700 rounded text-xs font-semibold text-slate-700 transition-colors border border-slate-200"
+                    >
+                      3x (30, 60 e 90d)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleAddManualBoleto}
+                      className="px-2.5 py-1 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded text-xs font-semibold transition-colors border border-indigo-200 flex items-center gap-1"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Adicionar Parcela
+                    </button>
+                  </div>
+                </div>
+
+                {/* List of Boletos Cards */}
+                <div className="space-y-3">
+                  {manualBoletos.map((boleto, bIdx) => {
+                    const cleanBarcode = boleto.barcode.replace(/\D/g, '');
+                    return (
+                      <div
+                        key={boleto.id}
+                        className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-3"
+                      >
+                        <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                          <div className="flex items-center gap-2">
+                            <span className="px-2 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded text-[11px] font-bold">
+                              Parcela {bIdx + 1} de {manualBoletos.length}
+                            </span>
+                            <span className="text-xs text-slate-500 font-medium">
+                              Destino: <strong>{manualDestination}</strong>
+                            </span>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveManualBoleto(bIdx)}
+                            className="text-slate-400 hover:text-rose-600 p-1 rounded hover:bg-rose-50 transition-colors"
+                            title="Remover esta parcela"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+                          {/* Código de barras / Linha Digitável */}
+                          <div className="md:col-span-6 space-y-1">
+                            <div className="flex items-center justify-between">
+                              <label className="text-xs font-bold text-slate-700 flex items-center gap-1">
+                                <Barcode className="w-3.5 h-3.5 text-indigo-600" />
+                                Código de Barras / Linha Digitável *
+                              </label>
+                              <span className="text-[11px] font-mono text-slate-400">
+                                {cleanBarcode.length > 0 ? `${cleanBarcode.length} dígitos` : 'Vazio'}
+                              </span>
+                            </div>
+                            <div className="relative">
+                              <input
+                                type="text"
+                                placeholder="Digite ou cole os 47 ou 48 dígitos do código de barras..."
+                                value={boleto.barcode}
+                                onChange={(e) => handleUpdateManualBoleto(bIdx, 'barcode', e.target.value)}
+                                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono font-semibold text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
+                              />
+                            </div>
+                          </div>
+
+                          {/* Valor do Boleto */}
+                          <div className="md:col-span-3 space-y-1">
+                            <div className="flex items-center justify-between">
+                              <label className="text-xs font-bold text-slate-700">
+                                Valor (R$) *
+                              </label>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const totalProd = manualItems.reduce((acc, it) => acc + it.totalPrice, 0);
+                                  const otherBoletosTotal = manualBoletos
+                                    .filter((_, i) => i !== bIdx)
+                                    .reduce((acc, b) => acc + b.amount, 0);
+                                  const remainder = Math.max(0, Number((totalProd - otherBoletosTotal).toFixed(2)));
+                                  handleUpdateManualBoleto(bIdx, 'amount', remainder);
+                                }}
+                                className="text-[10px] text-indigo-600 hover:text-indigo-800 font-semibold underline"
+                              >
+                                Restante
+                              </button>
+                            </div>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0.01"
+                              required
+                              value={boleto.amount || ''}
+                              onChange={(e) => handleUpdateManualBoleto(bIdx, 'amount', e.target.value)}
+                              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold text-indigo-900 focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
+                            />
+                          </div>
+
+                          {/* Data de Vencimento */}
+                          <div className="md:col-span-3 space-y-1">
+                            <label className="block text-xs font-bold text-slate-700">
+                              Vencimento *
+                            </label>
+                            <input
+                              type="date"
+                              required
+                              value={boleto.dueDate}
+                              onChange={(e) => handleUpdateManualBoleto(bIdx, 'dueDate', e.target.value)}
+                              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-semibold text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Resumo Financeiro dos Boletos vs Nota */}
+                {manualBoletos.length > 0 && (
+                  <div className="bg-white p-3.5 rounded-xl border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                    <div className="flex items-center gap-4 flex-wrap">
+                      <div>
+                        <span className="text-slate-500">Total da Nota: </span>
+                        <strong className="text-slate-800 font-bold ml-1">
+                          {formatBRL(manualItems.reduce((acc, it) => acc + it.totalPrice, 0))}
+                        </strong>
+                      </div>
+                      <div>
+                        <span className="text-slate-500">Total dos Boletos: </span>
+                        <strong className="text-indigo-800 font-extrabold ml-1">
+                          {formatBRL(manualBoletos.reduce((acc, b) => acc + b.amount, 0))}
+                        </strong>
+                      </div>
+                    </div>
+
+                    <div>
+                      {Math.abs(
+                        manualItems.reduce((acc, it) => acc + it.totalPrice, 0) -
+                        manualBoletos.reduce((acc, b) => acc + b.amount, 0)
+                      ) < 0.01 ? (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold text-[11px]">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                          Valor dos boletos confere com a nota fiscal
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-50 text-amber-800 border border-amber-200 font-semibold text-[11px]">
+                          <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
+                          Diferença: {formatBRL(Math.abs(
+                            manualItems.reduce((acc, it) => acc + it.totalPrice, 0) -
+                            manualBoletos.reduce((acc, b) => acc + b.amount, 0)
+                          ))}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="flex justify-end gap-3 pt-2">
@@ -780,10 +1295,21 @@ export const InvoiceEntry: React.FC<InvoiceEntryProps> = ({
           {/* Header da NF Staged */}
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-200">
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="px-2 py-0.5 text-xs font-semibold rounded bg-indigo-50 text-indigo-700 border border-indigo-200">
                   NF-e nº {stagedInvoice.number} • Série {stagedInvoice.series}
                 </span>
+
+                {/* Destino da Mercadoria */}
+                <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold flex items-center gap-1 border ${
+                  stagedInvoice.destinationBranch === 'TERESINA'
+                    ? 'bg-teal-50 text-teal-800 border-teal-200'
+                    : 'bg-blue-50 text-blue-800 border-blue-200'
+                }`}>
+                  <MapPin className="w-3.5 h-3.5" />
+                  Destino: {stagedInvoice.destinationBranch || 'PARNARAMA'}
+                </span>
+
                 <span className="text-xs text-slate-400">|</span>
                 <span className="text-xs font-medium text-slate-600 flex items-center gap-1">
                   <Calendar className="w-3.5 h-3.5 text-slate-400" />
@@ -819,13 +1345,95 @@ export const InvoiceEntry: React.FC<InvoiceEntryProps> = ({
           </div>
 
           {/* Chave de Acesso */}
-          <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg flex items-center gap-2 text-xs">
-            <KeyRound className="w-4 h-4 text-slate-400 shrink-0" />
-            <span className="text-slate-500">Chave de Acesso:</span>
-            <span className="font-mono font-medium text-slate-800 break-all select-all">
-              {stagedInvoice.accessKey}
-            </span>
+          <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-2 min-w-0">
+              <KeyRound className="w-4 h-4 text-slate-400 shrink-0" />
+              <span className="text-slate-500">Chave de Acesso:</span>
+              <span className="font-mono font-medium text-slate-800 break-all select-all">
+                {stagedInvoice.accessKey}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                navigator.clipboard.writeText(stagedInvoice.accessKey);
+                setCopiedBarcodeId('chave');
+                setTimeout(() => setCopiedBarcodeId(null), 2000);
+              }}
+              className="shrink-0 flex items-center gap-1 px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-300 rounded text-xs text-slate-700 font-semibold"
+            >
+              {copiedBarcodeId === 'chave' ? (
+                <>
+                  <Check className="w-3.5 h-3.5 text-emerald-600" />
+                  Chave Copiada!
+                </>
+              ) : (
+                <>
+                  <Copy className="w-3.5 h-3.5 text-slate-500" />
+                  Copiar Chave
+                </>
+              )}
+            </button>
           </div>
+
+          {/* Boletos Vinculados na Nota em Conferência */}
+          {stagedInvoice.boletos && stagedInvoice.boletos.length > 0 && (
+            <div className="p-4 bg-indigo-50/50 border border-indigo-200 rounded-xl space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-bold text-indigo-950 uppercase tracking-wide flex items-center gap-1.5">
+                  <Barcode className="w-4 h-4 text-indigo-600" />
+                  Boletos Cadastrados nesta Nota ({stagedInvoice.boletos.length})
+                </h4>
+                <span className="text-xs font-bold text-indigo-900">
+                  Total em Boletos: {formatBRL(stagedInvoice.boletos.reduce((acc, b) => acc + b.amount, 0))}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {stagedInvoice.boletos.map((bol, bIdx) => (
+                  <div key={bIdx} className="bg-white p-3 rounded-lg border border-indigo-100 shadow-2xs space-y-1.5 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-slate-800">
+                        Parcela {bol.installmentNumber || bIdx + 1} de {stagedInvoice.boletos?.length}
+                      </span>
+                      <span className="font-extrabold text-indigo-900">
+                        {formatBRL(bol.amount)}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between text-slate-500">
+                      <span>Vencimento:</span>
+                      <strong className="text-slate-800">{formatDateBR(bol.dueDate)}</strong>
+                    </div>
+
+                    {bol.barcode && (
+                      <div className="pt-1 border-t border-slate-100 flex items-center justify-between gap-2">
+                        <span className="font-mono text-[11px] text-slate-600 truncate">
+                          {formatBarcodeDisplay(bol.barcode)}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(bol.barcode);
+                            setCopiedBarcodeId(`bol-${bIdx}`);
+                            setTimeout(() => setCopiedBarcodeId(null), 2000);
+                          }}
+                          className="shrink-0 p-1 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded"
+                          title="Copiar código de barras"
+                        >
+                          {copiedBarcodeId === `bol-${bIdx}` ? (
+                            <Check className="w-3.5 h-3.5 text-emerald-600" />
+                          ) : (
+                            <Copy className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Itens e Diagnóstico de Estoque */}
           <div className="space-y-3">
@@ -1031,6 +1639,12 @@ export const InvoiceEntry: React.FC<InvoiceEntryProps> = ({
                   {formatBRL(stagedInvoice.totals.totalInvoiceValue)}
                 </span>
               </div>
+              {stagedInvoice.boletos && stagedInvoice.boletos.length > 0 && (
+                <div className="px-2.5 py-1 bg-indigo-50 border border-indigo-200 rounded-lg text-indigo-900 font-bold">
+                  <span>{stagedInvoice.boletos.length} boleto(s): </span>
+                  <span>{formatBRL(stagedInvoice.boletos.reduce((acc, b) => acc + b.amount, 0))}</span>
+                </div>
+              )}
             </div>
 
             <div className="flex items-center gap-3 w-full sm:w-auto">

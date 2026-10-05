@@ -37,11 +37,37 @@ export interface InvoiceItem {
   cofins?: number;
 }
 
+export type InvoiceDestination = 'PARNARAMA' | 'TERESINA';
+export type BoletoStatus = 'PENDENTE' | 'PAGO' | 'VENCIDO' | 'CANCELADO';
+
+export interface InvoiceBoleto {
+  id: string;
+  invoiceId?: string; // ID da NF vinculada
+  invoiceNumber?: string; // Número da NF
+  supplierName?: string; // Nome do fornecedor / favorecido
+  supplierCnpj?: string; // CNPJ fornecedor
+  destinationBranch?: InvoiceDestination; // PARNARAMA ou TERESINA
+  barcode: string; // Código de barras / Linha digitável
+  amount: number; // Valor (R$)
+  dueDate: string; // Data de Vencimento (YYYY-MM-DD)
+  installmentNumber?: number; // Número da parcela (ex: 1)
+  totalInstallments?: number; // Total de parcelas (ex: 3)
+  status: BoletoStatus;
+  paidAt?: string; // Data do pagamento (YYYY-MM-DD)
+  paymentTime?: string; // Hora do pagamento
+  paidAmount?: number; // Valor pago efetivo
+  paymentMethod?: string; // PIX, Conta Bancária, Dinheiro, etc.
+  notes?: string; // Observações
+  createdAt: string;
+  updatedAt?: string;
+}
+
 export interface Invoice {
   id: string;
   number: string; // nNF
   series: string; // serie
   accessKey: string; // chave de 44 dígitos
+  destinationBranch?: InvoiceDestination; // PARNARAMA ou TERESINA
   issueDate: string; // dhEmi (YYYY-MM-DD ou ISO)
   entryDate: string; // Data de recebimento no estoque
   supplier: {
@@ -65,6 +91,7 @@ export interface Invoice {
     discountValue: number;
     totalInvoiceValue: number;
   };
+  boletos?: InvoiceBoleto[]; // Boletos bancários vinculados à nota
   notes?: string;
   status: 'CONFIRMADA' | 'CANCELADA';
   createdAt: string;

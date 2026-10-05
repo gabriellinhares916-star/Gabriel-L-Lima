@@ -1,10 +1,12 @@
 import React, { useState, useMemo } from 'react';
 import { ExpenseRecord, ExpenseCategory, ExpenseCategorySummary } from '../types';
+import { CompanySettings } from '../utils/companySettings';
 import {
   EXPENSE_CATEGORIES_CONFIG,
   calculateCategorySummary,
   exportCategoryReportCSV
 } from '../utils/expenseStorage';
+import { ExpenseCategoryPdfModal } from './ExpenseCategoryPdfModal';
 import {
   PieChart as PieChartIcon,
   BarChart3,
@@ -19,7 +21,8 @@ import {
   Building2,
   ChevronDown,
   ChevronUp,
-  Tag
+  Tag,
+  Printer
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -40,6 +43,8 @@ interface ExpensesCategoryReportProps {
   competenceMonthFilter: string;
   onChangeCompetenceFilter: (month: string) => void;
   availableMonths: string[];
+  companySettings?: CompanySettings;
+  onOpenPdfReport?: (cat: ExpenseCategory) => void;
 }
 
 function formatBRL(val: number): string {
@@ -51,9 +56,20 @@ export const ExpensesCategoryReport: React.FC<ExpensesCategoryReportProps> = ({
   competenceMonthFilter,
   onChangeCompetenceFilter,
   availableMonths,
+  companySettings,
+  onOpenPdfReport,
 }) => {
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'PAGA' | 'PENDENTE'>('ALL');
   const [expandedCategoryId, setExpandedCategoryId] = useState<string | null>(null);
+  const [internalPdfCategory, setInternalPdfCategory] = useState<ExpenseCategory | null>(null);
+
+  const handleOpenCategoryPdf = (cat: ExpenseCategory) => {
+    if (onOpenPdfReport) {
+      onOpenPdfReport(cat);
+    } else {
+      setInternalPdfCategory(cat);
+    }
+  };
 
   // Filtragem das despesas aplicadas ao relatório
   const filteredExpenses = useMemo(() => {
@@ -152,11 +168,20 @@ export const ExpensesCategoryReport: React.FC<ExpensesCategoryReportProps> = ({
 
           <div className="flex flex-wrap items-center gap-2.5">
             <button
+              onClick={() => handleOpenCategoryPdf(topCategory?.category || 'ALUGUEL')}
+              className="flex items-center gap-1.5 px-3.5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition-all shadow-xs cursor-pointer active:scale-95"
+              title="Gerar e imprimir documento PDF formatado com o resumo da categoria"
+            >
+              <Printer className="w-4 h-4" />
+              <span>Exportar Relatório</span>
+            </button>
+
+            <button
               onClick={handleExportCSV}
               className="flex items-center gap-1.5 px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition-all shadow-xs cursor-pointer"
             >
               <FileSpreadsheet className="w-4 h-4" />
-              <span>Exportar Relatório (CSV)</span>
+              <span>Exportar (CSV)</span>
             </button>
           </div>
         </div>
@@ -315,7 +340,7 @@ export const ExpensesCategoryReport: React.FC<ExpensesCategoryReportProps> = ({
                       ))}
                     </Pie>
                     <Tooltip
-                      formatter={(val: number) => [formatBRL(val), 'Valor']}
+                      formatter={(val: any) => [formatBRL(Number(val) || 0), 'Valor']}
                       contentStyle={{
                         backgroundColor: '#0f172a',
                         color: '#fff',
@@ -376,7 +401,7 @@ export const ExpensesCategoryReport: React.FC<ExpensesCategoryReportProps> = ({
                       tickFormatter={(val) => `R$ ${val}`}
                     />
                     <Tooltip
-                      formatter={(val: number) => [formatBRL(val)]}
+                      formatter={(val: any) => [formatBRL(Number(val) || 0)]}
                       labelFormatter={(label) => `Categoria: ${label}`}
                       contentStyle={{
                         backgroundColor: '#0f172a',
@@ -481,52 +506,62 @@ export const ExpensesCategoryReport: React.FC<ExpensesCategoryReportProps> = ({
                   </div>
                 </div>
 
-                {/* Botão de Ver Contas desta Categoria */}
-                {hasExpenses && (
-                  <div className="mt-4 pt-3 border-t border-slate-100">
+                {/* Ações da Categoria */}
+                <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleOpenCategoryPdf(catSummary.category)}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold transition-colors cursor-pointer"
+                    title={`Exportar Relatório PDF formatado de ${catSummary.label}`}
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>Exportar Relatório</span>
+                  </button>
+
+                  {hasExpenses && (
                     <button
                       type="button"
                       onClick={() => toggleExpandCategory(catSummary.category)}
-                      className="w-full flex items-center justify-between text-xs font-bold text-slate-600 hover:text-indigo-600 cursor-pointer transition-colors"
+                      className="flex items-center gap-1 text-xs font-bold text-slate-500 hover:text-slate-800 cursor-pointer transition-colors"
                     >
-                      <span>{isExpanded ? 'Ocultar Contas' : 'Ver Contas da Categoria'}</span>
+                      <span>{isExpanded ? 'Ocultar Contas' : 'Ver Contas'}</span>
                       {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                     </button>
+                  )}
+                </div>
 
-                    {/* Lista expandida de despesas individuais da categoria */}
-                    {isExpanded && (
-                      <div className="mt-2.5 space-y-1.5 text-xs border-t border-slate-100 pt-2">
-                        {catExpenses.map(exp => (
-                          <div
-                            key={exp.id}
-                            className="p-2 rounded-lg bg-slate-50 hover:bg-slate-100/80 transition-colors flex items-center justify-between gap-2"
+                {/* Lista expandida de despesas individuais da categoria */}
+                {hasExpenses && isExpanded && (
+                  <div className="mt-2.5 space-y-1.5 text-xs border-t border-slate-100 pt-2">
+                    {catExpenses.map(exp => (
+                      <div
+                        key={exp.id}
+                        className="p-2 rounded-lg bg-slate-50 hover:bg-slate-100/80 transition-colors flex items-center justify-between gap-2"
+                      >
+                        <div className="truncate">
+                          <strong className="block text-slate-800 text-[11px] truncate">
+                            {exp.description}
+                          </strong>
+                          <span className="text-[10px] text-slate-400">
+                            Venc: {exp.dueDate.split('-').reverse().join('/')}
+                          </span>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <span className="font-mono font-bold text-[11px] text-slate-900 block">
+                            {formatBRL(exp.amount)}
+                          </span>
+                          <span
+                            className={`text-[9px] font-bold px-1.5 py-0.2 rounded-full ${
+                              exp.status === 'PAGA'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : 'bg-amber-100 text-amber-800'
+                            }`}
                           >
-                            <div className="truncate">
-                              <strong className="block text-slate-800 text-[11px] truncate">
-                                {exp.description}
-                              </strong>
-                              <span className="text-[10px] text-slate-400">
-                                Venc: {exp.dueDate.split('-').reverse().join('/')}
-                              </span>
-                            </div>
-                            <div className="text-right shrink-0">
-                              <span className="font-mono font-bold text-[11px] text-slate-900 block">
-                                {formatBRL(exp.amount)}
-                              </span>
-                              <span
-                                className={`text-[9px] font-bold px-1.5 py-0.2 rounded-full ${
-                                  exp.status === 'PAGA'
-                                    ? 'bg-emerald-100 text-emerald-800'
-                                    : 'bg-amber-100 text-amber-800'
-                                }`}
-                              >
-                                {exp.status}
-                              </span>
-                            </div>
-                          </div>
-                        ))}
+                            {exp.status}
+                          </span>
+                        </div>
                       </div>
-                    )}
+                    ))}
                   </div>
                 )}
               </div>
@@ -563,6 +598,7 @@ export const ExpensesCategoryReport: React.FC<ExpensesCategoryReportProps> = ({
                 <th className="py-3 px-4 text-center">Participação (%)</th>
                 <th className="py-3 px-4 text-center">Nº Contas</th>
                 <th className="py-3 px-4 text-right">Ticket Médio</th>
+                <th className="py-3 px-4 text-center">Relatório PDF</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -597,6 +633,17 @@ export const ExpensesCategoryReport: React.FC<ExpensesCategoryReportProps> = ({
                     <td className="py-3 px-4 text-right font-mono text-slate-700 whitespace-nowrap">
                       {formatBRL(avg)}
                     </td>
+                    <td className="py-3 px-4 text-center whitespace-nowrap">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenCategoryPdf(cat.category)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-bold transition-colors cursor-pointer"
+                        title={`Exportar Relatório PDF formatado de ${cat.label}`}
+                      >
+                        <Printer className="w-3.5 h-3.5" />
+                        <span>Exportar Relatório</span>
+                      </button>
+                    </td>
                   </tr>
                 );
               })}
@@ -624,11 +671,28 @@ export const ExpensesCategoryReport: React.FC<ExpensesCategoryReportProps> = ({
                 <td className="py-3.5 px-4 text-right font-mono">
                   {filteredExpenses.length > 0 ? formatBRL(totalAmountAll / filteredExpenses.length) : '-'}
                 </td>
+                <td className="py-3.5 px-4 text-center font-mono text-[11px] text-slate-400">
+                  -
+                </td>
               </tr>
             </tfoot>
           </table>
         </div>
       </div>
+
+      {/* Modal de Exportação do Relatório PDF */}
+      {internalPdfCategory && (
+        <ExpenseCategoryPdfModal
+          isOpen={!!internalPdfCategory}
+          onClose={() => setInternalPdfCategory(null)}
+          selectedCategory={internalPdfCategory}
+          onChangeCategory={(cat) => setInternalPdfCategory(cat)}
+          expenses={expenses}
+          competenceMonthFilter={competenceMonthFilter}
+          companySettings={companySettings}
+        />
+      )}
+
     </div>
   );
 };

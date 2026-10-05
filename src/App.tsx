@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Product, Invoice, StockMovement, MovementType, Employee, TimePunch, PunchType, SalaryAdvance, BillingRecord } from './types';
+import { Product, Invoice, StockMovement, MovementType, Employee, TimePunch, PunchType, SalaryAdvance, BillingRecord, ExpenseRecord, ExpensePaymentMethod, InvoiceBoleto, BoletoStatus } from './types';
 import {
   getStoredProducts,
   saveStoredProducts,
@@ -38,6 +38,26 @@ import {
   resetBillingsDemo,
   clearAllBillings
 } from './utils/billingStorage';
+import {
+  getStoredExpenses,
+  addExpenseRecord,
+  updateExpenseRecord,
+  payExpenseRecord,
+  deleteExpenseRecord,
+  resetExpensesDemo,
+  clearAllExpenses
+} from './utils/expenseStorage';
+import {
+  getStoredBoletos,
+  addStoredBoleto,
+  updateStoredBoleto,
+  payStoredBoleto,
+  reopenStoredBoleto,
+  deleteStoredBoleto,
+  syncBoletosWithInvoices,
+  clearAllBoletos,
+  calculateBoletoStatus,
+} from './utils/boletoStorage';
 import { CompanySettings, getStoredCompanySettings, saveStoredCompanySettings } from './utils/companySettings';
 import { AuthUser } from './types/auth';
 import { getStoredAuthSession, clearAuthSession } from './utils/authStorage';
@@ -50,6 +70,7 @@ import {
   syncAdvancesToSupabase,
   syncCompanySettingsToSupabase,
   syncBillingsToSupabase,
+  syncExpensesToSupabase,
 } from './utils/supabaseClient';
 import { Navbar } from './components/Navbar';
 import { Dashboard } from './components/Dashboard';
@@ -61,6 +82,8 @@ import { PriceConsultationView } from './components/PriceConsultationView';
 import { TimeClockDashboard } from './components/TimeClockDashboard';
 import { SalaryAdvancesView } from './components/SalaryAdvancesView';
 import { BillingView } from './components/BillingView';
+import { ExpensesManagementView } from './components/ExpensesManagementView';
+import { BoletosManagementView } from './components/BoletosManagementView';
 import { UserManagementView } from './components/UserManagementView';
 import { LoginScreen } from './components/LoginScreen';
 import { DanfeModal } from './components/DanfeModal';
@@ -69,7 +92,7 @@ import { SupabaseSyncModal } from './components/SupabaseSyncModal';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(getStoredAuthSession);
-  const [currentTab, setCurrentTab] = useState<'dashboard' | 'billing' | 'entry' | 'stock' | 'prices' | 'timeclock' | 'advances' | 'invoices' | 'reports' | 'users'>('dashboard');
+  const [currentTab, setCurrentTab] = useState<'dashboard' | 'billing' | 'expenses' | 'boletos' | 'entry' | 'stock' | 'prices' | 'timeclock' | 'advances' | 'invoices' | 'reports' | 'users'>('dashboard');
   const [products, setProducts] = useState<Product[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [movements, setMovements] = useState<StockMovement[]>([]);
@@ -77,6 +100,8 @@ export default function App() {
   const [punches, setPunches] = useState<TimePunch[]>([]);
   const [advances, setAdvances] = useState<SalaryAdvance[]>([]);
   const [billings, setBillings] = useState<BillingRecord[]>([]);
+  const [expenses, setExpenses] = useState<ExpenseRecord[]>([]);
+  const [boletos, setBoletos] = useState<InvoiceBoleto[]>([]);
   const [companySettings, setCompanySettings] = useState<CompanySettings>(getStoredCompanySettings);
   const [isCompanySettingsModalOpen, setIsCompanySettingsModalOpen] = useState<boolean>(false);
   const [isSupabaseModalOpen, setIsSupabaseModalOpen] = useState<boolean>(false);
@@ -95,12 +120,15 @@ export default function App() {
     }
 
     setProducts(getStoredProducts());
-    setInvoices(getStoredInvoices());
+    const storedInvs = getStoredInvoices();
+    setInvoices(storedInvs);
     setMovements(getStoredMovements());
     setEmployees(getStoredEmployees());
     setPunches(getStoredPunches());
     setAdvances(getStoredSalaryAdvances());
     setBillings(getStoredBillings());
+    setExpenses(getStoredExpenses());
+    setBoletos(syncBoletosWithInvoices(storedInvs));
     setCompanySettings(getStoredCompanySettings());
   }, []);
 
@@ -238,10 +266,13 @@ export default function App() {
     setProducts(result.products);
     setInvoices(result.invoices);
     setMovements(result.movements);
+    setBoletos(syncBoletosWithInvoices(result.invoices));
     syncProductsToSupabase(result.products).catch(() => {});
     syncInvoicesToSupabase(result.invoices).catch(() => {});
     syncMovementsToSupabase(result.movements).catch(() => {});
-    showToast(`Entrada da NF-e nº ${invoiceData.number} efetivada com sucesso no estoque!`);
+    const dest = invoiceData.destinationBranch || 'PARNARAMA';
+    const bols = invoiceData.boletos?.length || 0;
+    showToast(`Entrada da NF-e nº ${invoiceData.number} efetivada no estoque de ${dest}${bols > 0 ? ` com ${bols} boleto(s)` : ''}!`);
   };
 
   // Registrar movimentação manual (saída/consumo/ajuste)
@@ -322,31 +353,118 @@ export default function App() {
     }
   };
 
+  // Handlers do Módulo de Despesas e Contas a Pagar
+  const handleAddExpense = (data: Omit<ExpenseRecord, 'id' | 'createdAt'>) => {
+    const created = addExpenseRecord(data);
+    const updated = getStoredExpenses();
+    setExpenses(updated);
+    syncExpensesToSupabase([created]).catch(() => {});
+    showToast(`Despesa "${created.description}" cadastrada com sucesso!`);
+  };
+
+  const handleUpdateExpense = (id: string, data: Partial<ExpenseRecord>) => {
+    const updated = updateExpenseRecord(id, data);
+    if (updated) {
+      const refreshed = getStoredExpenses();
+      setExpenses(refreshed);
+      syncExpensesToSupabase([updated]).catch(() => {});
+      showToast('Despesa atualizada com sucesso!');
+    }
+  };
+
+  const handlePayExpense = (
+    id: string,
+    paymentData: { paymentDate: string; paymentTime?: string; paymentMethod: ExpensePaymentMethod; notes?: string }
+  ) => {
+    const paid = payExpenseRecord(id, paymentData);
+    if (paid) {
+      const refreshed = getStoredExpenses();
+      setExpenses(refreshed);
+      syncExpensesToSupabase([paid]).catch(() => {});
+      showToast(`Baixa confirmada na despesa "${paid.description}"!`);
+    }
+  };
+
+  const handleDeleteExpense = (id: string) => {
+    const ok = deleteExpenseRecord(id);
+    if (ok) {
+      const refreshed = getStoredExpenses();
+      setExpenses(refreshed);
+      showToast('Despesa removida com sucesso.');
+    }
+  };
+
+  // Handlers para Gestão de Boletos Bancários
+  const handleAddBoleto = (boletoData: Omit<InvoiceBoleto, 'id' | 'createdAt' | 'status'> & { status?: BoletoStatus }) => {
+    const res = addStoredBoleto(boletoData);
+    if (res.success) {
+      setBoletos(res.boletos);
+      showToast(`Boleto de ${res.boleto.supplierName || 'Fornecedor'} cadastrado com sucesso!`);
+    }
+  };
+
+  const handleUpdateBoleto = (id: string, updates: Partial<InvoiceBoleto>) => {
+    const res = updateStoredBoleto(id, updates);
+    if (res.success) {
+      setBoletos(res.boletos);
+      showToast('Boleto atualizado com sucesso.');
+    }
+  };
+
+  const handlePayBoleto = (id: string, paymentData: { paidAt?: string; paymentTime?: string; paidAmount?: number; paymentMethod?: string; notes?: string }) => {
+    const res = payStoredBoleto(id, paymentData);
+    if (res.success) {
+      setBoletos(res.boletos);
+      showToast('Baixa no boleto liquidada com sucesso!');
+    }
+  };
+
+  const handleReopenBoleto = (id: string) => {
+    const res = reopenStoredBoleto(id);
+    if (res.success) {
+      setBoletos(res.boletos);
+      showToast('Boleto reaberto como pendente.');
+    }
+  };
+
+  const handleDeleteBoleto = (id: string) => {
+    const res = deleteStoredBoleto(id);
+    if (res.success) {
+      setBoletos(res.boletos);
+      showToast('Boleto excluído com sucesso.');
+    }
+  };
+
   // Limpar e zerar todos os dados preenchidos para iniciar a partir de hoje
   const handleClearAllData = () => {
-    if (window.confirm('Tem certeza que deseja APAGAR TODOS OS DADOS preenchidos para iniciar suas operações reais a partir de hoje? Isso limpará todas as ordens de serviço (faturamentos), notas fiscais, movimentações de estoque, batidas de ponto e vales.')) {
+    if (window.confirm('Tem certeza que deseja APAGAR TODOS OS DADOS preenchidos para iniciar suas operações reais a partir de hoje? Isso limpará todas as ordens de serviço (faturamentos), notas fiscais, movimentações de estoque, batidas de ponto, vales, despesas e boletos.')) {
       clearAllDatabase();
       clearAllBillings();
       clearAllAdvances();
       clearAllPunches();
+      clearAllExpenses();
+      clearAllBoletos();
       setProducts([]);
       setInvoices([]);
       setMovements([]);
       setPunches([]);
       setAdvances([]);
       setBillings([]);
+      setExpenses([]);
+      setBoletos([]);
       showToast('Todos os dados foram excluídos! Base zerada para iniciar os lançamentos reais a partir de hoje.');
     }
   };
 
   // Resetar para dados de demonstração
   const handleResetDemo = () => {
-    if (window.confirm('Deseja recarregar os dados de exemplo do sistema? Isto restaurará os produtos, notas, movimentações, pontos, vales e faturamentos padrão.')) {
+    if (window.confirm('Deseja recarregar os dados de exemplo do sistema? Isto restaurará os produtos, notas, movimentações, pontos, vales, faturamentos e despesas padrão.')) {
       const demo = resetDemoDatabase();
       localStorage.removeItem('nfe_stock_employees_v1');
       localStorage.removeItem('nfe_stock_punches_v1');
       localStorage.removeItem('nfe_stock_salary_advances_v1');
       localStorage.removeItem('lordlub_billing_records_v1');
+      clearAllBoletos();
       setProducts(demo.products);
       setInvoices(demo.invoices);
       setMovements(demo.movements);
@@ -354,11 +472,14 @@ export default function App() {
       setPunches(getStoredPunches());
       setAdvances(resetSalaryAdvancesDemo());
       setBillings(resetBillingsDemo());
+      setExpenses(resetExpensesDemo());
+      setBoletos(syncBoletosWithInvoices(demo.invoices));
       showToast('Dados de demonstração restaurados com sucesso!');
     }
   };
 
   const lowStockCount = products.filter(p => p.currentStock <= p.minStock).length;
+  const pendingBoletosCount = boletos.filter(b => calculateBoletoStatus(b) !== 'PAGO').length;
 
   const handleLogout = () => {
     clearAuthSession();
@@ -410,6 +531,7 @@ export default function App() {
         onResetDemo={handleResetDemo}
         onClearAllData={handleClearAllData}
         lowStockAlertsCount={lowStockCount}
+        pendingBoletosCount={pendingBoletosCount}
         companySettings={companySettings}
         onOpenCompanySettings={() => setIsCompanySettingsModalOpen(true)}
         onOpenSupabaseSync={() => setIsSupabaseModalOpen(true)}
@@ -427,6 +549,8 @@ export default function App() {
             billings={billings}
             employees={employees}
             punches={punches}
+            expenses={expenses}
+            boletos={boletos}
             companySettings={companySettings}
             onNavigate={setCurrentTab}
             onOpenDanfe={(inv) => setActiveDanfeInvoice(inv)}
@@ -444,6 +568,30 @@ export default function App() {
             onResetDemo={() => setBillings(resetBillingsDemo())}
             companySettings={companySettings}
             employees={employees}
+          />
+        )}
+
+        {currentTab === 'expenses' && (
+          <ExpensesManagementView
+            expenses={expenses}
+            onAddExpense={handleAddExpense}
+            onUpdateExpense={handleUpdateExpense}
+            onPayExpense={handlePayExpense}
+            onDeleteExpense={handleDeleteExpense}
+            companySettings={companySettings}
+          />
+        )}
+
+        {currentTab === 'boletos' && (
+          <BoletosManagementView
+            boletos={boletos}
+            invoices={invoices}
+            onAddBoleto={handleAddBoleto}
+            onUpdateBoleto={handleUpdateBoleto}
+            onPayBoleto={handlePayBoleto}
+            onReopenBoleto={handleReopenBoleto}
+            onDeleteBoleto={handleDeleteBoleto}
+            onNavigateToInvoiceEntry={() => setCurrentTab('entry')}
           />
         )}
 
@@ -503,6 +651,7 @@ export default function App() {
           <InvoicesList
             invoices={invoices}
             onNavigateToNewEntry={() => setCurrentTab('entry')}
+            onNavigateToBoletos={() => setCurrentTab('boletos')}
           />
         )}
 

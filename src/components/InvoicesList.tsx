@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Invoice } from '../types';
+import { Invoice, InvoiceDestination } from '../types';
 import { formatBRL, formatDateBR } from '../utils/stockCalculations';
+import { formatBarcodeDisplay } from '../utils/boletoStorage';
 import { DanfeModal } from './DanfeModal';
 import {
   FileText,
@@ -12,24 +13,42 @@ import {
   Calendar,
   Layers,
   KeyRound,
-  Download
+  Download,
+  Barcode,
+  MapPin,
+  Copy,
+  Check,
+  CheckCircle2,
+  Clock,
+  AlertTriangle
 } from 'lucide-react';
 import { exportInvoicesCSV } from '../utils/csvExport';
 
 interface InvoicesListProps {
   invoices: Invoice[];
   onNavigateToNewEntry: () => void;
+  onNavigateToBoletos?: () => void;
 }
 
 export const InvoicesList: React.FC<InvoicesListProps> = ({
   invoices,
   onNavigateToNewEntry,
+  onNavigateToBoletos,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
+  const [destinationFilter, setDestinationFilter] = useState<'ALL' | InvoiceDestination>('ALL');
   const [selectedInvoiceForDanfe, setSelectedInvoiceForDanfe] = useState<Invoice | null>(null);
   const [expandedInvoiceId, setExpandedInvoiceId] = useState<string | null>(null);
+  const [copiedKeyId, setCopiedKeyId] = useState<string | null>(null);
 
   const filteredInvoices = invoices.filter(inv => {
+    // Destination filter
+    if (destinationFilter !== 'ALL') {
+      const dest = inv.destinationBranch || 'PARNARAMA';
+      if (dest !== destinationFilter) return false;
+    }
+
+    // Search term
     const term = searchTerm.toLowerCase();
     return (
       inv.number.toLowerCase().includes(term) ||
@@ -41,6 +60,13 @@ export const InvoicesList: React.FC<InvoicesListProps> = ({
 
   const totalValueAll = invoices.reduce((acc, inv) => acc + inv.totals.totalInvoiceValue, 0);
 
+  const handleCopyText = (id: string, text: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedKeyId(id);
+      setTimeout(() => setCopiedKeyId(null), 2000);
+    });
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -51,11 +77,21 @@ export const InvoicesList: React.FC<InvoicesListProps> = ({
             Notas Fiscais de Entrada Registradas
           </h2>
           <p className="text-sm text-slate-500 mt-1">
-            Histórico completo de NF-e recebidas, fornecedores, DANFEs e composição de mercadorias.
+            Histórico completo de NF-e recebidas com filial de destino (Parnarama e Teresina), boletos bancários, DANFEs e composição de mercadorias.
           </p>
         </div>
 
-        <div className="flex items-center gap-2 self-start sm:self-auto">
+        <div className="flex items-center gap-2 flex-wrap self-start sm:self-auto">
+          {onNavigateToBoletos && (
+            <button
+              onClick={onNavigateToBoletos}
+              className="flex items-center gap-1.5 px-3.5 py-2.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-lg border border-indigo-200 transition-colors shadow-2xs"
+            >
+              <Barcode className="w-4 h-4" />
+              Gestão de Boletos
+            </button>
+          )}
+
           <button
             onClick={() => exportInvoicesCSV(filteredInvoices)}
             className="flex items-center gap-1.5 px-3.5 py-2.5 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-lg border border-slate-300 transition-colors shadow-2xs"
@@ -75,7 +111,7 @@ export const InvoicesList: React.FC<InvoicesListProps> = ({
       </div>
 
       {/* Mini Stats Bar */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
           <div className="text-xs text-slate-500 font-medium">Total de Notas Registradas</div>
           <div className="text-xl font-bold text-slate-900 mt-1">
@@ -97,21 +133,66 @@ export const InvoicesList: React.FC<InvoicesListProps> = ({
           <div className="text-xl font-bold text-emerald-700 mt-1">
             {invoices.reduce((acc, inv) => acc + inv.items.reduce((s, it) => s + it.quantity, 0), 0)} unidades
           </div>
-          <div className="text-[11px] text-slate-500 mt-0.5">Em {invoices.reduce((acc, inv) => acc + inv.items.length, 0)} linhas de produto</div>
+          <div className="text-[11px] text-slate-500 mt-0.5">Em {invoices.reduce((acc, inv) => acc + inv.items.length, 0)} produtos</div>
+        </div>
+
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
+          <div className="text-xs text-slate-500 font-medium">Boletos Vinculados</div>
+          <div className="text-xl font-bold text-indigo-900 mt-1">
+            {invoices.reduce((acc, inv) => acc + (inv.boletos?.length || 0), 0)} boletos
+          </div>
+          <div className="text-[11px] text-slate-500 mt-0.5">Contas a pagar cadastradas</div>
         </div>
       </div>
 
-      {/* Search Input */}
-      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-        <div className="relative">
+      {/* Search & Filter Bar */}
+      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-col md:flex-row gap-3 items-center justify-between">
+        <div className="relative flex-1 w-full">
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
             type="text"
             placeholder="Buscar por número da NF, fornecedor, CNPJ ou chave de acesso de 44 dígitos..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 border border-slate-300 rounded-lg text-xs focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
+            className="w-full pl-9 pr-4 py-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
           />
+        </div>
+
+        {/* Destino Filter */}
+        <div className="inline-flex p-1 bg-slate-100 rounded-lg border border-slate-200 text-xs shrink-0 self-start md:self-auto">
+          <button
+            type="button"
+            onClick={() => setDestinationFilter('ALL')}
+            className={`px-3 py-1.5 rounded-md font-semibold transition-all ${
+              destinationFilter === 'ALL'
+                ? 'bg-white text-slate-900 shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            Todas as Filiais
+          </button>
+          <button
+            type="button"
+            onClick={() => setDestinationFilter('PARNARAMA')}
+            className={`px-3 py-1.5 rounded-md font-semibold transition-all ${
+              destinationFilter === 'PARNARAMA'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            Parnarama (MA)
+          </button>
+          <button
+            type="button"
+            onClick={() => setDestinationFilter('TERESINA')}
+            className={`px-3 py-1.5 rounded-md font-semibold transition-all ${
+              destinationFilter === 'TERESINA'
+                ? 'bg-teal-600 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            Teresina (PI)
+          </button>
         </div>
       </div>
 
@@ -145,9 +226,29 @@ export const InvoicesList: React.FC<InvoicesListProps> = ({
                           NF-e nº {invoice.number}
                         </span>
                         <span className="text-xs text-slate-400">Série {invoice.series}</span>
+
+                        {/* Destino Badge */}
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border flex items-center gap-1 ${
+                          invoice.destinationBranch === 'TERESINA'
+                            ? 'bg-teal-50 text-teal-800 border-teal-200'
+                            : 'bg-blue-50 text-blue-800 border-blue-200'
+                        }`}>
+                          <MapPin className="w-2.5 h-2.5" />
+                          {invoice.destinationBranch || 'PARNARAMA'}
+                        </span>
+
+                        {/* Status NF */}
                         <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
                           {invoice.status}
                         </span>
+
+                        {/* Boletos Badge */}
+                        {invoice.boletos && invoice.boletos.length > 0 && (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 flex items-center gap-1">
+                            <Barcode className="w-3 h-3" />
+                            {invoice.boletos.length} {invoice.boletos.length === 1 ? 'Boleto' : 'Boletos'}
+                          </span>
+                        )}
                       </div>
 
                       <div className="text-xs text-slate-600 mt-1 flex items-center gap-1.5 font-medium">
@@ -207,10 +308,90 @@ export const InvoicesList: React.FC<InvoicesListProps> = ({
                 {/* Detalhes expandidos dos itens da nota */}
                 {isExpanded && (
                   <div className="bg-slate-50 border-t border-slate-200 p-4 space-y-3">
-                    <div className="text-[11px] text-slate-500 flex items-center gap-1.5 font-mono">
-                      <KeyRound className="w-3.5 h-3.5 text-slate-400" />
-                      <span>Chave: {invoice.accessKey}</span>
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2.5 bg-white rounded-lg border border-slate-200 text-[11px] font-mono">
+                      <div className="flex items-center gap-1.5 text-slate-700 break-all select-all">
+                        <KeyRound className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                        <span>Chave: {invoice.accessKey}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleCopyText(invoice.id, invoice.accessKey)}
+                        className="shrink-0 flex items-center gap-1 px-2.5 py-1 bg-slate-50 hover:bg-slate-100 border border-slate-300 rounded text-[11px] text-slate-700 font-sans font-semibold transition-colors"
+                      >
+                        {copiedKeyId === invoice.id ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-emerald-600" />
+                            Copiada!
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5 text-slate-500" />
+                            Copiar Chave
+                          </>
+                        )}
+                      </button>
                     </div>
+
+                    {/* Boletos Vinculados a esta Nota */}
+                    {invoice.boletos && invoice.boletos.length > 0 && (
+                      <div className="p-3.5 bg-indigo-50/60 border border-indigo-200 rounded-lg space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-xs font-bold text-indigo-950 flex items-center gap-1.5 uppercase tracking-wide">
+                            <Barcode className="w-4 h-4 text-indigo-600" />
+                            Boletos Vinculados a esta Nota ({invoice.boletos.length})
+                          </h4>
+                          {onNavigateToBoletos && (
+                            <button
+                              onClick={onNavigateToBoletos}
+                              className="text-[11px] text-indigo-700 hover:text-indigo-900 font-bold underline"
+                            >
+                              Ver na Gestão de Boletos →
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                          {invoice.boletos.map((bol, bIdx) => {
+                            const isPaid = bol.status === 'PAGO';
+                            return (
+                              <div key={bIdx} className="bg-white p-3 rounded-lg border border-indigo-100 shadow-2xs text-xs space-y-1.5">
+                                <div className="flex items-center justify-between">
+                                  <span className="font-bold text-slate-800">
+                                    Parcela {bol.installmentNumber || bIdx + 1} de {invoice.boletos?.length}
+                                  </span>
+                                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                    isPaid ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                                  }`}>
+                                    {bol.status}
+                                  </span>
+                                </div>
+                                <div className="flex items-center justify-between text-slate-600 font-semibold">
+                                  <span>Vencimento: {formatDateBR(bol.dueDate)}</span>
+                                  <span className="text-indigo-900 font-extrabold">{formatBRL(bol.amount)}</span>
+                                </div>
+                                {bol.barcode && (
+                                  <div className="pt-1.5 border-t border-slate-100 flex items-center justify-between gap-1 text-[11px] font-mono text-slate-500">
+                                    <span className="truncate">{formatBarcodeDisplay(bol.barcode)}</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleCopyText(`bol-${bIdx}-${invoice.id}`, bol.barcode)}
+                                      className="p-1 hover:bg-slate-100 rounded text-slate-700 shrink-0"
+                                      title="Copiar código de barras"
+                                    >
+                                      {copiedKeyId === `bol-${bIdx}-${invoice.id}` ? (
+                                        <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                      ) : (
+                                        <Copy className="w-3.5 h-3.5 text-slate-400" />
+                                      )}
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
 
                     <div className="border border-slate-200 rounded-lg overflow-x-auto bg-white">
                       <table className="w-full text-left text-xs border-collapse">

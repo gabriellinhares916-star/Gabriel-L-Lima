@@ -1,6 +1,7 @@
-import { Product, Invoice, StockMovement, MovementType } from '../types';
+import { Product, Invoice, StockMovement, MovementType, InvoiceBoleto } from '../types';
 import { calculateWeightedAverageCost } from './stockCalculations';
 import { calculateProductPurchaseSummary } from './purchaseAverageCalculations';
+import { syncBoletosWithInvoices } from './boletoStorage';
 
 const STORAGE_KEYS = {
   PRODUCTS: 'nfe_stock_products_clean_v1',
@@ -216,16 +217,36 @@ export function processInvoiceEntry(invoiceData: Omit<Invoice, 'id' | 'createdAt
     newMovements.push(movement);
   });
 
+  // Enriquecer boletos da nota com dados do cabeçalho da NF
+  const enrichedBoletos: InvoiceBoleto[] = (invoiceData.boletos || []).map((b, bIdx) => ({
+    ...b,
+    id: b.id || `bol-${Date.now()}-${bIdx}`,
+    invoiceId: invoiceId,
+    invoiceNumber: invoiceData.number,
+    supplierName: invoiceData.supplier.name,
+    supplierCnpj: invoiceData.supplier.cnpj,
+    destinationBranch: invoiceData.destinationBranch,
+    status: b.status || (b.dueDate && b.dueDate < nowISO.substring(0, 10) ? 'VENCIDO' : 'PENDENTE'),
+    createdAt: b.createdAt || nowISO,
+    updatedAt: nowISO,
+  }));
+
   const finalInvoice: Invoice = {
     ...invoiceData,
     id: invoiceId,
     items: processedItems,
+    boletos: enrichedBoletos,
     status: 'CONFIRMADA',
     createdAt: nowISO,
   };
 
   const updatedInvoices = [finalInvoice, ...currentInvoices];
   const updatedMovements = [...newMovements, ...currentMovements];
+
+  // Sincronizar boletos gerados na nota com a gestão de boletos
+  if (enrichedBoletos.length > 0) {
+    syncBoletosWithInvoices(updatedInvoices);
+  }
 
   // Recalcular o PREÇO MÉDIO ponderado das 4 últimas notas fiscais de entrada para os produtos afetados
   processedItems.forEach(item => {
@@ -249,6 +270,24 @@ export function processInvoiceEntry(invoiceData: Omit<Invoice, 'id' | 'createdAt
     products: currentProducts,
     movements: updatedMovements,
   };
+}
+
+/**
+ * Atualiza a lista de boletos de uma nota fiscal específica
+ */
+export function updateInvoiceBoletos(invoiceId: string, boletos: InvoiceBoleto[]): Invoice[] {
+  const currentInvoices = getStoredInvoices();
+  const index = currentInvoices.findIndex(inv => inv.id === invoiceId);
+  if (index === -1) return currentInvoices;
+
+  currentInvoices[index] = {
+    ...currentInvoices[index],
+    boletos,
+  };
+
+  saveStoredInvoices(currentInvoices);
+  syncBoletosWithInvoices(currentInvoices);
+  return currentInvoices;
 }
 
 /**

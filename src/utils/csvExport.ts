@@ -365,6 +365,7 @@ export function exportInvoicesCSV(invoices: Invoice[]): void {
     'Número da NF-e',
     'Série',
     'Chave de Acesso (44 dígitos)',
+    'Destino / Filial',
     'Fornecedor',
     'CNPJ Fornecedor',
     'UF',
@@ -377,25 +378,33 @@ export function exportInvoicesCSV(invoices: Invoice[]): void {
     'Valor de Tributos / Impostos (R$)',
     'Valor de Descontos (R$)',
     'Valor Total da Nota Fiscal (R$)',
+    'Qtd. de Boletos',
+    'Total em Boletos (R$)',
   ];
 
-  const rows = invoices.map(inv => [
-    inv.number,
-    inv.series,
-    inv.accessKey,
-    inv.supplier.name,
-    inv.supplier.cnpj,
-    inv.supplier.uf || 'SP',
-    formatDateBR(inv.issueDate),
-    formatDateBR(inv.entryDate),
-    inv.status,
-    inv.items.length,
-    inv.totals.productsValue.toFixed(2).replace('.', ','),
-    inv.totals.freightValue.toFixed(2).replace('.', ','),
-    inv.totals.taxesValue.toFixed(2).replace('.', ','),
-    inv.totals.discountValue.toFixed(2).replace('.', ','),
-    inv.totals.totalInvoiceValue.toFixed(2).replace('.', ','),
-  ]);
+  const rows = invoices.map(inv => {
+    const boletosTotal = (inv.boletos || []).reduce((acc, b) => acc + b.amount, 0);
+    return [
+      inv.number,
+      inv.series,
+      inv.accessKey,
+      inv.destinationBranch || 'PARNARAMA',
+      inv.supplier.name,
+      inv.supplier.cnpj,
+      inv.supplier.uf || 'SP',
+      formatDateBR(inv.issueDate),
+      formatDateBR(inv.entryDate),
+      inv.status,
+      inv.items.length,
+      inv.totals.productsValue.toFixed(2).replace('.', ','),
+      inv.totals.freightValue.toFixed(2).replace('.', ','),
+      inv.totals.taxesValue.toFixed(2).replace('.', ','),
+      inv.totals.discountValue.toFixed(2).replace('.', ','),
+      inv.totals.totalInvoiceValue.toFixed(2).replace('.', ','),
+      inv.boletos?.length || 0,
+      boletosTotal.toFixed(2).replace('.', ','),
+    ];
+  });
 
   const dateStr = new Date().toISOString().substring(0, 10);
   downloadCSV(`Relatorio_Notas_Fiscais_Entrada_${dateStr}.csv`, headers, rows);

@@ -1,6 +1,6 @@
 {
   "name": "Gestor NF-e & Estoque",
-  "description": "Sistema completo para entrada de notas fiscais eletrônicas, controle de estoque com custo médio, relatórios de movimentação, controle de ponto, adiantamentos salariais e faturamento de ordens de serviço (OS).",
+  "description": "Sistema completo para entrada de notas fiscais eletrônicas com chave de acesso e filiais (Parnarama/Teresina), gestão de boletos bancários com código de barras, controle de estoque com custo médio, controle de ponto, faturamento e despesas.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

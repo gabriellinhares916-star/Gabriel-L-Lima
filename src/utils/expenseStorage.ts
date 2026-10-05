@@ -370,6 +370,10 @@ export function resetExpensesDemo(): ExpenseRecord[] {
   return INITIAL_DEMO_EXPENSES;
 }
 
+export function clearAllExpenses(): void {
+  localStorage.removeItem(STORAGE_KEY);
+}
+
 /**
  * Calcula o sumário consolidado de despesas agrupado por categoria
  */

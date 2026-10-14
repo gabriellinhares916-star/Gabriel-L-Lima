@@ -1497,6 +1497,24 @@ CREATE TABLE IF NOT EXISTS public.expenses (
 `;
 
 export const BILLING_TABLE_ONLY_SQL = SUPABASE_SQL_SCHEMA;
+export const UPDATE_MIGRATION_SQL = SUPABASE_SQL_SCHEMA;
+
+export interface MonitoredTableInfo {
+  key: string;
+  label: string;
+}
+
+export const MONITORED_TABLES: MonitoredTableInfo[] = [
+  { key: 'products', label: '1. Produtos' },
+  { key: 'stock_movements', label: '2. Movimentações' },
+  { key: 'invoices', label: '3. Notas Fiscais' },
+  { key: 'employees', label: '4. Colaboradores' },
+  { key: 'time_punches', label: '5. Ponto (REP-P)' },
+  { key: 'salary_advances', label: '6. Vales Salariais' },
+  { key: 'company_settings', label: '7. Dados Empresa' },
+  { key: 'billings', label: '8. Faturamento (OS)' },
+  { key: 'expenses', label: '9. Despesas' },
+];
 
 export async function pushFullDatabaseToSupabase(data: {
   products: Product[];

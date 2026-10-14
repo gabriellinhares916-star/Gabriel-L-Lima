@@ -1,13 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { AuthUser, UserRole } from '../types/auth';
-import {
-  getStoredUsers,
-  addUser,
-  updateUser,
-  toggleUserStatus,
-  deleteUser,
-  resetUsersDemo,
-} from '../utils/authStorage';
+import { supabaseSignUp } from '../utils/supabaseClient';
 import {
   UserCog,
   UserPlus,
@@ -32,7 +25,8 @@ import {
   Filter,
   Check,
   X,
-  Power
+  Power,
+  Database
 } from 'lucide-react';
 
 interface UserManagementViewProps {
@@ -46,10 +40,11 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
   onUpdateCurrentUser,
   onNotify,
 }) => {
-  const [users, setUsers] = useState<AuthUser[]>(getStoredUsers);
+  const [users, setUsers] = useState<AuthUser[]>([currentUser]);
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [roleFilter, setRoleFilter] = useState<string>('ALL');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   // Modais
   const [isAddModalOpen, setIsAddModalOpen] = useState<boolean>(false);
@@ -75,12 +70,6 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
   const [editStatus, setEditStatus] = useState<'ATIVO' | 'INATIVO'>('ATIVO');
   const [editDepartment, setEditDepartment] = useState<string>('');
   const [editError, setEditError] = useState<string | null>(null);
-
-  // Recarregar usuários do storage
-  const reloadUsers = () => {
-    const list = getStoredUsers();
-    setUsers(list);
-  };
 
   // Filtragem dos usuários
   const filteredUsers = useMemo(() => {
@@ -115,26 +104,54 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
     setIsAddModalOpen(true);
   };
 
-  // Submeter cadastro
-  const handleSubmitAdd = (e: React.FormEvent) => {
+  // Submeter cadastro REAL no Supabase Auth
+  const handleSubmitAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     setAddError(null);
 
-    const res = addUser({
-      name: addName,
-      email: addEmail,
-      password: addPassword,
-      role: addRole,
-      department: addDepartment,
-      status: 'ATIVO',
-    });
+    if (!addName.trim() || addName.trim().length < 3) {
+      setAddError('O nome deve conter pelo menos 3 caracteres.');
+      return;
+    }
 
-    if (res.success && res.user) {
-      reloadUsers();
-      setIsAddModalOpen(false);
-      if (onNotify) onNotify(`Usuário "${res.user.name}" cadastrado com sucesso!`);
-    } else {
-      setAddError(res.error || 'Erro ao cadastrar usuário.');
+    if (!addEmail.trim() || !addEmail.includes('@')) {
+      setAddError('Informe um e-mail válido para cadastro no Supabase.');
+      return;
+    }
+
+    if (addPassword.trim().length < 6) {
+      setAddError('A senha deve ter no mínimo 6 caracteres (padrão Supabase).');
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      const res = await supabaseSignUp({
+        name: addName.trim(),
+        email: addEmail.trim(),
+        password: addPassword.trim(),
+        role: addRole,
+        department: addDepartment.trim(),
+      });
+
+      setIsSubmitting(false);
+
+      if (res.success && res.user) {
+        setUsers(prev => [res.user!, ...prev.filter(u => u.id !== res.user!.id)]);
+        setIsAddModalOpen(false);
+        if (onNotify) {
+          onNotify(
+            res.message ||
+              `Usuário "${res.user.name}" cadastrado com sucesso no Supabase Auth (tabela auth.users)!`
+          );
+        }
+      } else {
+        setAddError(res.error || 'Erro ao registrar usuário no Supabase Auth.');
+      }
+    } catch (err: any) {
+      setIsSubmitting(false);
+      setAddError(err.message || 'Falha na conexão com Supabase Auth.');
     }
   };
 
@@ -157,60 +174,48 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
     if (!editingUser) return;
     setEditError(null);
 
-    const res = updateUser(
-      editingUser.id,
-      {
-        name: editName,
-        email: editEmail,
-        password: editPassword ? editPassword : undefined,
-        role: editRole,
-        status: editStatus,
-        department: editDepartment,
-      },
-      currentUser.id
-    );
+    const updatedUser: AuthUser = {
+      ...editingUser,
+      name: editName.trim() || editingUser.name,
+      role: editRole,
+      status: editStatus,
+      department: editDepartment.trim() || editingUser.department,
+      updatedAt: new Date().toISOString(),
+    };
 
-    if (res.success && res.user) {
-      reloadUsers();
-      if (currentUser.id === res.user.id && onUpdateCurrentUser) {
-        onUpdateCurrentUser(res.user);
-      }
-      setEditingUser(null);
-      if (onNotify) onNotify(`Dados do usuário "${res.user.name}" atualizados com sucesso!`);
-    } else {
-      setEditError(res.error || 'Erro ao atualizar dados do usuário.');
+    setUsers(prev => prev.map(u => u.id === editingUser.id ? updatedUser : u));
+    if (currentUser.id === updatedUser.id && onUpdateCurrentUser) {
+      onUpdateCurrentUser(updatedUser);
     }
+    setEditingUser(null);
+    if (onNotify) onNotify(`Perfil de "${updatedUser.name}" atualizado.`);
   };
 
   // Alternar status Ativo / Inativo
   const handleToggleStatus = (user: AuthUser) => {
-    const res = toggleUserStatus(user.id, currentUser.id);
-    if (res.success && res.user) {
-      reloadUsers();
-      if (currentUser.id === res.user.id && onUpdateCurrentUser) {
-        onUpdateCurrentUser(res.user);
-      }
-      if (onNotify) {
-        const actionText = res.user.status === 'ATIVO' ? 'ativado' : 'inativado';
-        onNotify(`O acesso de "${res.user.name}" foi ${actionText}.`);
-      }
-    } else {
-      alert(res.error || 'Não foi possível alterar o status do usuário.');
+    if (user.id === currentUser.id) {
+      alert('Você não pode desativar seu próprio usuário logado.');
+      return;
+    }
+    const newStatus = user.status === 'ATIVO' ? 'INATIVO' : 'ATIVO';
+    const updated = { ...user, status: newStatus as 'ATIVO' | 'INATIVO' };
+    setUsers(prev => prev.map(u => u.id === user.id ? updated : u));
+    if (onNotify) {
+      onNotify(`Status do usuário "${user.name}" alterado para ${newStatus}.`);
     }
   };
 
   // Confirmar exclusão
   const handleConfirmDelete = () => {
     if (!deletingUser) return;
-    const res = deleteUser(deletingUser.id, currentUser.id);
-    if (res.success) {
-      reloadUsers();
+    if (deletingUser.id === currentUser.id) {
+      alert('Você não pode excluir sua própria conta enquanto conectado.');
       setDeletingUser(null);
-      if (onNotify) onNotify(`Usuário excluído com sucesso.`);
-    } else {
-      alert(res.error || 'Erro ao excluir usuário.');
-      setDeletingUser(null);
+      return;
     }
+    setUsers(prev => prev.filter(u => u.id !== deletingUser.id));
+    setDeletingUser(null);
+    if (onNotify) onNotify('Usuário removido da listagem.');
   };
 
   // Formatar data em PT-BR

@@ -1,22 +1,13 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import {
-  Product,
-  StockMovement,
-  Invoice,
-  Employee,
-  TimePunch,
-  SalaryAdvance,
-  BillingRecord,
-  ExpenseRecord,
-  InvoiceBoleto
-} from '../types';
-import { CompanySettings } from './companySettings';
+import { createClient, SupabaseClient, User } from '@supabase/supabase-js';
+import { Product, StockMovement, Invoice, Employee, TimePunch, PunchType, SalaryAdvance, BillingRecord, ExpenseRecord } from '../types';
+import { CompanySettings, DEFAULT_COMPANY_SETTINGS } from './companySettings';
+import { AuthUser, UserRole } from '../types/auth';
+import { calculateWeightedAverageCost } from './stockCalculations';
 
-// Credenciais padrão fornecidas
+// Credenciais do Supabase oficial
 const DEFAULT_SUPABASE_URL = 'https://izketyjtzbghnebqgnjv.supabase.co';
 const DEFAULT_SUPABASE_KEY = 'sb_publishable_Nt2QJXnvf8XDlPyjmoCfRA_pgFrE7oS';
 
-// Sanitiza URL removendo /rest/v1 caso fornecido
 export function getSanitizedSupabaseUrl(): string {
   const envUrl = (import.meta.env.VITE_SUPABASE_URL as string) || DEFAULT_SUPABASE_URL;
   return envUrl.replace(/\/rest\/v1\/?$/, '').replace(/\/+$/, '');
@@ -33,229 +24,1320 @@ export const supabase: SupabaseClient = createClient(supabaseUrl, supabaseKey, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
+    detectSessionInUrl: true,
   },
 });
+
+// ==========================================
+// FORMATAÇÃO E AUTENTICAÇÃO REAL SUPABASE
+// ==========================================
+
+export function formatAuthUser(user: User | null): AuthUser | null {
+  if (!user) return null;
+  const metadata = user.user_metadata || {};
+  const name =
+    metadata.name ||
+    metadata.full_name ||
+    (user.email ? user.email.split('@')[0] : 'Usuário');
+  const role: UserRole = metadata.role === 'STANDARD' ? 'STANDARD' : 'ADMIN';
+  const department = metadata.department || 'Geral';
+
+  return {
+    id: user.id,
+    name,
+    email: user.email || '',
+    role,
+    status: 'ATIVO',
+    department,
+    createdAt: user.created_at || new Date().toISOString(),
+    lastLogin: user.last_sign_in_at || new Date().toISOString(),
+  };
+}
+
+export async function supabaseSignIn(
+  email: string,
+  password: string
+): Promise<{ success: boolean; user?: AuthUser; error?: string }> {
+  try {
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: email.trim(),
+      password,
+    });
+
+    if (error) {
+      let friendlyError = error.message;
+      if (error.message.includes('Invalid login credentials')) {
+        friendlyError = 'E-mail ou senha incorretos. Verifique suas credenciais.';
+      } else if (error.message.includes('Email not confirmed')) {
+        friendlyError = 'O e-mail ainda não foi confirmado. Verifique sua caixa de entrada ou o painel do Supabase.';
+      } else if (error.message.includes('rate limit')) {
+        friendlyError = 'Muitas tentativas em pouco tempo. Aguarde alguns instantes e tente novamente.';
+      }
+      return { success: false, error: friendlyError };
+    }
+
+    if (!data.user) {
+      return { success: false, error: 'Usuário não retornado pelo Supabase.' };
+    }
+
+    const authUser = formatAuthUser(data.user);
+    return { success: true, user: authUser || undefined };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Erro inesperado ao realizar login no Supabase.' };
+  }
+}
+
+export async function supabaseSignUp(params: {
+  email: string;
+  password: string;
+  name: string;
+  role?: UserRole;
+  department?: string;
+}): Promise<{
+  success: boolean;
+  user?: AuthUser;
+  needsEmailConfirmation?: boolean;
+  message?: string;
+  error?: string;
+}> {
+  try {
+    const email = params.email.trim();
+    const role: UserRole = params.role || 'ADMIN';
+    const name = params.name.trim();
+    const department = params.department?.trim() || 'Diretoria / Gestão';
+
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password: params.password,
+      options: {
+        data: {
+          name,
+          role,
+          department,
+        },
+      },
+    });
+
+    if (error) {
+      let friendly = error.message;
+      if (error.message.includes('already registered')) {
+        friendly = 'Este e-mail já está cadastrado no sistema. Faça login com ele.';
+      } else if (error.message.includes('rate limit')) {
+        friendly = 'Limite de envio de e-mails do Supabase atingido. Aguarde alguns minutos ou desative a confirmação de e-mail no painel do Supabase.';
+      } else if (error.message.includes('at least 6 characters')) {
+        friendly = 'A senha deve conter no mínimo 6 caracteres.';
+      }
+      return { success: false, error: friendly };
+    }
+
+    if (!data.user) {
+      return { success: false, error: 'Falha ao registrar usuário no Supabase Auth.' };
+    }
+
+    const authUser = formatAuthUser(data.user);
+    const hasSession = !!data.session;
+
+    return {
+      success: true,
+      user: authUser || undefined,
+      needsEmailConfirmation: !hasSession,
+      message: hasSession
+        ? 'Conta criada e autenticada com sucesso!'
+        : 'Cadastro realizado no Supabase Auth! Caso a confirmação de e-mail esteja ativada no seu projeto, confirme o e-mail antes de fazer login.',
+    };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Erro inesperado no cadastro do Supabase Auth.' };
+  }
+}
+
+export async function supabaseSignOut(): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      return { success: false, error: error.message };
+    }
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Erro ao deslogar do Supabase.' };
+  }
+}
+
+export async function supabaseGetSession(): Promise<{ user: AuthUser | null; session: any; error?: string }> {
+  try {
+    const { data, error } = await supabase.auth.getSession();
+    if (error) {
+      return { user: null, session: null, error: error.message };
+    }
+    const user = data.session?.user ? formatAuthUser(data.session.user) : null;
+    return { user, session: data.session };
+  } catch (err: any) {
+    return { user: null, session: null, error: err.message };
+  }
+}
+
+// ==========================================
+// MAPPERS BIDIRECIONAIS: SUPABASE <-> MODELOS
+// ==========================================
+
+export function mapProductRow(row: any): Product {
+  const averageCost = Number(row.average_cost) || 0;
+  const lastCost = Number(row.last_cost) || 0;
+  const sellingPrice = row.selling_price !== null && row.selling_price !== undefined
+    ? Number(row.selling_price)
+    : Number(((lastCost || averageCost || 10) * 1.45).toFixed(2));
+  const costBase = averageCost > 0 ? averageCost : (lastCost || 1);
+  const marginPercent = row.margin_percent !== null && row.margin_percent !== undefined
+    ? Number(row.margin_percent)
+    : Number((((sellingPrice - costBase) / costBase) * 100).toFixed(1));
+
+  return {
+    id: row.id,
+    code: row.code,
+    name: row.name,
+    category: row.category || 'Geral',
+    unit: row.unit || 'UN',
+    ncm: row.ncm || undefined,
+    currentStock: Number(row.current_stock) || 0,
+    minStock: Number(row.min_stock) || 0,
+    averageCost,
+    lastCost,
+    sellingPrice,
+    marginPercent,
+    location: row.location || undefined,
+    createdAt: row.created_at || row.updated_at || new Date().toISOString(),
+    updatedAt: row.updated_at || new Date().toISOString(),
+  };
+}
+
+export function mapMovementRow(row: any): StockMovement {
+  return {
+    id: row.id,
+    productId: row.product_id,
+    productCode: row.product_code || 'PROD',
+    productName: row.product_name,
+    unit: row.unit || 'UN',
+    type: row.type,
+    documentType: (row.document_type as any) || 'MANUAL',
+    quantity: Number(row.quantity) || 0,
+    unitCost: Number(row.unit_cost) || 0,
+    totalCost: Number(row.total_cost) || 0,
+    resultingStock: Number(row.resulting_stock) || 0,
+    resultingAverageCost: Number(row.resulting_average_cost) || 0,
+    date: row.date,
+    documentNumber: row.document_number || undefined,
+    notes: row.notes || undefined,
+    supplierOrCustomer: row.supplier_or_customer || undefined,
+  };
+}
+
+export function mapInvoiceRow(row: any): Invoice {
+  return {
+    id: row.id,
+    number: row.number,
+    series: row.series,
+    issueDate: row.issue_date,
+    entryDate: row.entry_date,
+    accessKey: row.access_key,
+    supplier: row.supplier,
+    recipient: row.recipient || undefined,
+    totals: row.totals,
+    items: row.items,
+    status: row.status || 'CONFIRMADA',
+    createdAt: row.created_at || new Date().toISOString(),
+  };
+}
+
+export function mapEmployeeRow(row: any): Employee {
+  return {
+    id: row.id,
+    registrationNumber: row.registration_number,
+    name: row.name,
+    cpf: row.cpf,
+    role: row.role,
+    department: row.department,
+    workShift: row.work_shift || '08:00 às 17:00 (Segunda a Sexta)',
+    dailyHoursExpected: Number(row.daily_hours_expected) || 8,
+    pin: row.pin || undefined,
+    admissionDate: row.admission_date,
+    status: row.status || 'ATIVO',
+    hourlyRate: row.hourly_rate ? Number(row.hourly_rate) : undefined,
+    avatarInitials: row.avatar_initials || undefined,
+    phone: row.phone || undefined,
+    email: row.email || undefined,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function mapPunchRow(row: any): TimePunch {
+  return {
+    id: row.id,
+    employeeId: row.employee_id,
+    employeeName: row.employee_name,
+    date: row.date,
+    time: row.time,
+    timestamp: row.timestamp,
+    type: row.type,
+    source: row.source || 'RELOGIO_DIGITAL',
+    nsr: Number(row.nsr),
+    notes: row.notes || undefined,
+    device: row.device || undefined,
+  };
+}
+
+export function mapAdvanceRow(row: any): SalaryAdvance {
+  return {
+    id: row.id,
+    employeeId: row.employee_id,
+    employeeName: row.employee_name,
+    employeeRegistration: row.employee_registration,
+    employeeRole: row.employee_role || undefined,
+    employeeDepartment: row.employee_department || undefined,
+    date: row.date,
+    competenceMonth: row.competence_month,
+    amount: Number(row.amount) || 0,
+    paymentMethod: row.payment_method,
+    category: row.category || 'OUTRO',
+    reason: row.reason,
+    status: row.status,
+    approvedBy: row.approved_by || undefined,
+    receiptSigned: Boolean(row.receipt_signed),
+    notes: row.notes || undefined,
+    createdAt: row.created_at,
+  };
+}
+
+export function mapCompanySettingsRow(row: any): CompanySettings {
+  return {
+    name: row.name || DEFAULT_COMPANY_SETTINGS.name,
+    tradeName: row.trade_name || DEFAULT_COMPANY_SETTINGS.tradeName,
+    cnpj: row.cnpj || DEFAULT_COMPANY_SETTINGS.cnpj,
+    stateRegistration: row.state_registration || undefined,
+    phone: row.phone || undefined,
+    email: row.email || undefined,
+    address: row.address || undefined,
+    cityState: row.city_state || undefined,
+    logoUrl: row.logo_url || DEFAULT_COMPANY_SETTINGS.logoUrl,
+  };
+}
+
+export function mapBillingRow(row: any): BillingRecord {
+  return {
+    id: row.id,
+    date: row.date,
+    serviceOrderNumber: row.service_order_number,
+    collaboratorName: row.collaborator_name || undefined,
+    collaboratorId: row.collaborator_id || undefined,
+    productsTotal: Number(row.products_total) || 0,
+    alignmentBalancingTotal: Number(row.alignment_balancing_total) || 0,
+    servicesTotal: Number(row.services_total) || 0,
+    grandTotal: Number(row.grand_total) || 0,
+    customerName: row.customer_name || undefined,
+    vehiclePlate: row.vehicle_plate || undefined,
+    vehicleModel: row.vehicle_model || undefined,
+    paymentMethod: row.payment_method || 'PIX',
+    notes: row.notes || undefined,
+    createdAt: row.created_at || new Date().toISOString(),
+    updatedAt: row.updated_at || new Date().toISOString(),
+  };
+}
+
+export function mapExpenseRow(row: any): ExpenseRecord {
+  return {
+    id: row.id,
+    description: row.description,
+    category: row.category,
+    customCategoryName: row.custom_category_name || undefined,
+    amount: Number(row.amount) || 0,
+    dueDate: row.due_date,
+    paymentDate: row.payment_date || undefined,
+    paymentTime: row.payment_time || undefined,
+    competenceMonth: row.competence_month || row.due_date?.substring(0, 7) || '',
+    status: row.status || 'PENDENTE',
+    paymentMethod: row.payment_method || 'BOLETO',
+    supplierOrBeneficiary: row.supplier_or_beneficiary || undefined,
+    documentNumber: row.document_number || undefined,
+    notes: row.notes || undefined,
+    isRecurring: Boolean(row.is_recurring),
+    createdAt: row.created_at || new Date().toISOString(),
+    updatedAt: row.updated_at || new Date().toISOString(),
+  };
+}
+
+// ==========================================
+// CONSULTAS DIRETAS AO SUPABASE (LEITURA)
+// ==========================================
+
+export interface AppDatabaseState {
+  products: Product[];
+  movements: StockMovement[];
+  invoices: Invoice[];
+  employees: Employee[];
+  punches: TimePunch[];
+  advances: SalaryAdvance[];
+  companySettings: CompanySettings;
+  billings: BillingRecord[];
+  expenses: ExpenseRecord[];
+}
+
+export async function dbLoadAllAppData(): Promise<{
+  data?: AppDatabaseState;
+  errors?: Array<{ table: string; message: string; details?: string }>;
+}> {
+  const errors: Array<{ table: string; message: string; details?: string }> = [];
+
+  const [pRes, mRes, iRes, eRes, tpRes, saRes, csRes, bRes, expRes] = await Promise.all([
+    supabase.from('products').select('*').order('name', { ascending: true }),
+    supabase.from('stock_movements').select('*').order('created_at', { ascending: false }),
+    supabase.from('invoices').select('*').order('created_at', { ascending: false }),
+    supabase.from('employees').select('*').order('name', { ascending: true }),
+    supabase.from('time_punches').select('*').order('timestamp', { ascending: true }),
+    supabase.from('salary_advances').select('*').order('created_at', { ascending: false }),
+    supabase.from('company_settings').select('*').limit(1),
+    supabase.from('billings').select('*').order('date', { ascending: false }),
+    supabase.from('expenses').select('*').order('due_date', { ascending: false }),
+  ]);
+
+  if (pRes.error) errors.push({ table: 'products', message: pRes.error.message, details: pRes.error.details });
+  if (mRes.error) errors.push({ table: 'stock_movements', message: mRes.error.message, details: mRes.error.details });
+  if (iRes.error) errors.push({ table: 'invoices', message: iRes.error.message, details: iRes.error.details });
+  if (eRes.error) errors.push({ table: 'employees', message: eRes.error.message, details: eRes.error.details });
+  if (tpRes.error) errors.push({ table: 'time_punches', message: tpRes.error.message, details: tpRes.error.details });
+  if (saRes.error) errors.push({ table: 'salary_advances', message: saRes.error.message, details: saRes.error.details });
+  if (csRes.error) errors.push({ table: 'company_settings', message: csRes.error.message, details: csRes.error.details });
+  if (bRes.error) errors.push({ table: 'billings', message: bRes.error.message, details: bRes.error.details });
+  if (expRes.error) errors.push({ table: 'expenses', message: expRes.error.message, details: expRes.error.details });
+
+  const products = (pRes.data || []).map(mapProductRow);
+  const movements = (mRes.data || []).map(mapMovementRow);
+  const invoices = (iRes.data || []).map(mapInvoiceRow);
+  const employees = (eRes.data || []).map(mapEmployeeRow);
+  const punches = (tpRes.data || []).map(mapPunchRow);
+  const advances = (saRes.data || []).map(mapAdvanceRow);
+  const billings = (bRes.data || []).map(mapBillingRow);
+  const expenses = (expRes.data || []).map(mapExpenseRow);
+
+  const companySettings = csRes.data && csRes.data.length > 0
+    ? mapCompanySettingsRow(csRes.data[0])
+    : DEFAULT_COMPANY_SETTINGS;
+
+  return {
+    data: {
+      products,
+      movements,
+      invoices,
+      employees,
+      punches,
+      advances,
+      companySettings,
+      billings,
+      expenses,
+    },
+    errors: errors.length > 0 ? errors : undefined,
+  };
+}
+
+// ==========================================
+// OPERAÇÕES EM PRODUTOS (SUPABASE)
+// ==========================================
+
+export async function dbCreateProduct(product: Product): Promise<{ success: boolean; error?: string }> {
+  try {
+    const payload = {
+      id: product.id,
+      code: product.code,
+      name: product.name,
+      category: product.category || 'Geral',
+      unit: product.unit || 'UN',
+      ncm: product.ncm || null,
+      current_stock: product.currentStock,
+      min_stock: product.minStock,
+      average_cost: product.averageCost,
+      last_cost: product.lastCost,
+      selling_price: product.sellingPrice || null,
+      margin_percent: product.marginPercent || null,
+      location: product.location || null,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { error } = await supabase.from('products').insert(payload);
+    if (error) throw error;
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Erro ao cadastrar produto no Supabase.' };
+  }
+}
+
+export async function dbUpdateProductPrice(
+  productId: string,
+  newSellingPrice: number,
+  newMarginPercent?: number
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { error } = await supabase
+      .from('products')
+      .update({
+        selling_price: newSellingPrice,
+        margin_percent: newMarginPercent || null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', productId);
+
+    if (error) throw error;
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Erro ao atualizar preço no Supabase.' };
+  }
+}
+
+// ==========================================
+// OPERAÇÕES EM MOVIMENTAÇÕES DE ESTOQUE
+// ==========================================
+
+export async function dbRegisterStockMovement(params: {
+  productId: string;
+  type: StockMovement['type'];
+  quantity: number;
+  date: string;
+  documentNumber?: string;
+  supplierOrCustomer?: string;
+  notes?: string;
+  products: Product[];
+}): Promise<{ success: boolean; movement?: StockMovement; updatedProduct?: Product; error?: string }> {
+  try {
+    const target = params.products.find(p => p.id === params.productId);
+    if (!target) {
+      return { success: false, error: 'Produto não encontrado na base de dados.' };
+    }
+
+    const isExit = params.type.startsWith('SAIDA');
+    if (isExit && params.quantity > target.currentStock) {
+      return {
+        success: false,
+        error: `Saldo insuficiente em estoque! Saldo disponível: ${target.currentStock} ${target.unit}. Tentativa de saída: ${params.quantity} ${target.unit}.`,
+      };
+    }
+
+    const resultingStock = isExit
+      ? target.currentStock - params.quantity
+      : target.currentStock + params.quantity;
+
+    const unitCost = target.averageCost || target.lastCost || 0;
+    const totalCost = Number((unitCost * params.quantity).toFixed(2));
+    const movId = `mov-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+
+    const movementPayload = {
+      id: movId,
+      product_id: target.id,
+      product_name: target.name,
+      type: params.type,
+      quantity: params.quantity,
+      unit_cost: unitCost,
+      total_cost: totalCost,
+      resulting_stock: resultingStock,
+      resulting_average_cost: target.averageCost,
+      date: params.date,
+      document_number: params.documentNumber || null,
+      document_type: 'MANUAL',
+      notes: params.notes || null,
+      supplier_or_customer: params.supplierOrCustomer || null,
+      created_at: new Date().toISOString(),
+    };
+
+    // 1. Gravar movimentação
+    const { error: movError } = await supabase.from('stock_movements').insert(movementPayload);
+    if (movError) throw movError;
+
+    // 2. Atualizar saldo do produto
+    const { error: prodError } = await supabase
+      .from('products')
+      .update({
+        current_stock: resultingStock,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', target.id);
+    if (prodError) throw prodError;
+
+    const newMovement = mapMovementRow(movementPayload);
+    const updatedProduct: Product = {
+      ...target,
+      currentStock: resultingStock,
+      updatedAt: new Date().toISOString(),
+    };
+
+    return { success: true, movement: newMovement, updatedProduct };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Erro ao registrar movimentação de estoque.' };
+  }
+}
+
+// ==========================================
+// PROCESSAMENTO DE NOTA FISCAL (NF-E)
+// ==========================================
+
+export async function dbProcessInvoiceEntry(
+  invoiceData: Omit<Invoice, 'id' | 'createdAt' | 'status'>,
+  currentProducts: Product[]
+): Promise<{
+  success: boolean;
+  invoice?: Invoice;
+  products?: Product[];
+  movements?: StockMovement[];
+  error?: string;
+}> {
+  try {
+    const invoiceId = `inv-${Date.now()}`;
+    const nowISO = new Date().toISOString();
+    const entryDate = invoiceData.entryDate || nowISO.substring(0, 10);
+
+    const invoicePayload = {
+      id: invoiceId,
+      number: invoiceData.number,
+      series: invoiceData.series,
+      issue_date: invoiceData.issueDate,
+      entry_date: entryDate,
+      access_key: invoiceData.accessKey,
+      supplier: invoiceData.supplier,
+      recipient: invoiceData.recipient || null,
+      totals: invoiceData.totals,
+      items: invoiceData.items,
+      status: 'CONFIRMADA',
+      created_at: nowISO,
+    };
+
+    const updatedProductsMap = new Map<string, Product>();
+    currentProducts.forEach(p => updatedProductsMap.set(p.id, { ...p }));
+
+    const newMovementsPayload: any[] = [];
+    const productsUpsertPayload: any[] = [];
+
+    invoiceData.items.forEach((item, index) => {
+      let targetProduct: Product | undefined;
+
+      // Localizar produto por código ou nome
+      for (const p of updatedProductsMap.values()) {
+        if (p.code.trim().toUpperCase() === item.code.trim().toUpperCase() ||
+            p.name.trim().toLowerCase() === item.description.trim().toLowerCase()) {
+          targetProduct = p;
+          break;
+        }
+      }
+
+      if (targetProduct) {
+        const newAverageCost = calculateWeightedAverageCost(
+          targetProduct.currentStock,
+          targetProduct.averageCost,
+          item.quantity,
+          item.unitPrice
+        );
+        const newStock = targetProduct.currentStock + item.quantity;
+        let newSellingPrice = targetProduct.sellingPrice;
+        if (item.suggestedSalePrice !== undefined && item.suggestedSalePrice > 0) {
+          newSellingPrice = item.suggestedSalePrice;
+        } else if (!newSellingPrice) {
+          newSellingPrice = Number((item.unitPrice * 1.45).toFixed(2));
+        }
+        const costBase = newAverageCost > 0 ? newAverageCost : item.unitPrice;
+        const newMargin = item.marginPercent !== undefined
+          ? item.marginPercent
+          : Number((((newSellingPrice - costBase) / costBase) * 100).toFixed(1));
+
+        const updated: Product = {
+          ...targetProduct,
+          currentStock: newStock,
+          averageCost: newAverageCost,
+          lastCost: item.unitPrice,
+          sellingPrice: newSellingPrice,
+          marginPercent: newMargin,
+          ncm: item.ncm || targetProduct.ncm,
+          unit: item.unit || targetProduct.unit,
+          updatedAt: nowISO,
+        };
+        updatedProductsMap.set(targetProduct.id, updated);
+
+        productsUpsertPayload.push({
+          id: updated.id,
+          code: updated.code,
+          name: updated.name,
+          category: updated.category || 'Geral',
+          unit: updated.unit || 'UN',
+          ncm: updated.ncm || null,
+          current_stock: updated.currentStock,
+          min_stock: updated.minStock,
+          average_cost: updated.averageCost,
+          last_cost: updated.lastCost,
+          selling_price: updated.sellingPrice || null,
+          margin_percent: updated.marginPercent || null,
+          location: updated.location || null,
+          updated_at: nowISO,
+        });
+
+        newMovementsPayload.push({
+          id: `mov-${Date.now()}-${index}`,
+          product_id: updated.id,
+          product_name: updated.name,
+          type: 'ENTRADA_NFE',
+          quantity: item.quantity,
+          unit_cost: item.unitPrice,
+          total_cost: item.totalPrice,
+          resulting_stock: newStock,
+          resulting_average_cost: newAverageCost,
+          date: entryDate,
+          document_number: `NF-e ${invoiceData.number}`,
+          document_type: 'NFE',
+          notes: `Entrada NF-e nº ${invoiceData.number} - Fornecedor: ${invoiceData.supplier.name}`,
+          supplier_or_customer: invoiceData.supplier.name,
+          created_at: nowISO,
+        });
+      } else {
+        const prodId = `prod-${Date.now()}-${index}`;
+        const sellingPrice = item.suggestedSalePrice && item.suggestedSalePrice > 0
+          ? item.suggestedSalePrice
+          : Number((item.unitPrice * 1.45).toFixed(2));
+        const marginPercent = item.marginPercent !== undefined
+          ? item.marginPercent
+          : Number((((sellingPrice - item.unitPrice) / item.unitPrice) * 100).toFixed(1));
+
+        const newProd: Product = {
+          id: prodId,
+          code: item.code,
+          name: item.description,
+          category: 'Entrada Fiscal',
+          unit: item.unit || 'UN',
+          ncm: item.ncm,
+          currentStock: item.quantity,
+          minStock: Math.max(5, Math.ceil(item.quantity * 0.2)),
+          averageCost: item.unitPrice,
+          lastCost: item.unitPrice,
+          sellingPrice,
+          marginPercent,
+          createdAt: nowISO,
+          updatedAt: nowISO,
+        };
+        updatedProductsMap.set(prodId, newProd);
+
+        productsUpsertPayload.push({
+          id: newProd.id,
+          code: newProd.code,
+          name: newProd.name,
+          category: newProd.category,
+          unit: newProd.unit,
+          ncm: newProd.ncm || null,
+          current_stock: newProd.currentStock,
+          min_stock: newProd.minStock,
+          average_cost: newProd.averageCost,
+          last_cost: newProd.lastCost,
+          selling_price: newProd.sellingPrice || null,
+          margin_percent: newProd.marginPercent || null,
+          location: null,
+          updated_at: nowISO,
+        });
+
+        newMovementsPayload.push({
+          id: `mov-${Date.now()}-${index}`,
+          product_id: newProd.id,
+          product_name: newProd.name,
+          type: 'ENTRADA_NFE',
+          quantity: item.quantity,
+          unit_cost: item.unitPrice,
+          total_cost: item.totalPrice,
+          resulting_stock: item.quantity,
+          resulting_average_cost: item.unitPrice,
+          date: entryDate,
+          document_number: `NF-e ${invoiceData.number}`,
+          document_type: 'NFE',
+          notes: `Novo item cadastrado via NF-e nº ${invoiceData.number} de ${invoiceData.supplier.name}`,
+          supplier_or_customer: invoiceData.supplier.name,
+          created_at: nowISO,
+        });
+      }
+    });
+
+    // 1. Inserir NF-e
+    const { error: invErr } = await supabase.from('invoices').insert(invoicePayload);
+    if (invErr) throw invErr;
+
+    // 2. Upsert de produtos
+    if (productsUpsertPayload.length > 0) {
+      const { error: prodErr } = await supabase.from('products').upsert(productsUpsertPayload, { onConflict: 'id' });
+      if (prodErr) throw prodErr;
+    }
+
+    // 3. Inserir movimentações
+    if (newMovementsPayload.length > 0) {
+      const { error: movErr } = await supabase.from('stock_movements').insert(newMovementsPayload);
+      if (movErr) throw movErr;
+    }
+
+    const createdInvoice = mapInvoiceRow(invoicePayload);
+    const finalProducts = Array.from(updatedProductsMap.values());
+    const createdMovements = newMovementsPayload.map(mapMovementRow);
+
+    return {
+      success: true,
+      invoice: createdInvoice,
+      products: finalProducts,
+      movements: createdMovements,
+    };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Erro ao processar entrada da NF-e no Supabase.' };
+  }
+}
+
+// ==========================================
+// OPERAÇÕES EM COLABORADORES
+// ==========================================
+
+export async function dbCreateEmployee(employee: Employee): Promise<{ success: boolean; error?: string }> {
+  try {
+    const payload = {
+      id: employee.id,
+      registration_number: employee.registrationNumber,
+      name: employee.name,
+      cpf: employee.cpf,
+      role: employee.role,
+      department: employee.department,
+      work_shift: employee.workShift || '08:00 às 17:00 (Segunda a Sexta)',
+      daily_hours_expected: employee.dailyHoursExpected || 8,
+      pin: employee.pin || null,
+      admission_date: employee.admissionDate,
+      status: employee.status || 'ATIVO',
+      hourly_rate: employee.hourlyRate || null,
+      avatar_initials: employee.avatarInitials || null,
+      phone: employee.phone || null,
+      email: employee.email || null,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { error } = await supabase.from('employees').insert(payload);
+    if (error) throw error;
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Erro ao cadastrar colaborador no Supabase.' };
+  }
+}
+
+export async function dbUpdateEmployee(employee: Employee): Promise<{ success: boolean; error?: string }> {
+  try {
+    const payload = {
+      registration_number: employee.registrationNumber,
+      name: employee.name,
+      cpf: employee.cpf,
+      role: employee.role,
+      department: employee.department,
+      work_shift: employee.workShift || '08:00 às 17:00 (Segunda a Sexta)',
+      daily_hours_expected: employee.dailyHoursExpected || 8,
+      pin: employee.pin || null,
+      admission_date: employee.admissionDate,
+      status: employee.status || 'ATIVO',
+      hourly_rate: employee.hourlyRate || null,
+      avatar_initials: employee.avatarInitials || null,
+      phone: employee.phone || null,
+      email: employee.email || null,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { error } = await supabase.from('employees').update(payload).eq('id', employee.id);
+    if (error) throw error;
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Erro ao atualizar colaborador no Supabase.' };
+  }
+}
+
+export async function dbDeleteEmployee(employeeId: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    // 1. Remover batidas vinculadas
+    await supabase.from('time_punches').delete().eq('employee_id', employeeId);
+    // 2. Remover colaborador
+    const { error } = await supabase.from('employees').delete().eq('id', employeeId);
+    if (error) throw error;
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Erro ao excluir colaborador do Supabase.' };
+  }
+}
+
+// ==========================================
+// OPERAÇÕES EM BATIDAS DE PONTO (TIME PUNCHES)
+// ==========================================
+
+export async function dbRegisterPunch(params: {
+  employeeId: string;
+  type?: PunchType;
+  customTime?: string;
+  customDate?: string;
+  notes?: string;
+  employees: Employee[];
+  existingPunches: TimePunch[];
+}): Promise<{ success: boolean; punch?: TimePunch; error?: string }> {
+  try {
+    const employee = params.employees.find(e => e.id === params.employeeId);
+    if (!employee) {
+      return { success: false, error: 'Colaborador não encontrado.' };
+    }
+
+    const now = new Date();
+    const dateStr = params.customDate || now.toISOString().substring(0, 10);
+    const timeStr = params.customTime || now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    const timestampStr = `${dateStr}T${timeStr}:00.000Z`;
+
+    // Determinar o tipo da batida se não informado
+    let punchType = params.type;
+    if (!punchType) {
+      const todayPunches = params.existingPunches.filter(
+        p => p.employeeId === params.employeeId && p.date === dateStr
+      );
+      const count = todayPunches.length;
+      if (count === 0) punchType = 'ENTRADA';
+      else if (count === 1) punchType = 'SAIDA_INTERVALO';
+      else if (count === 2) punchType = 'RETORNO_INTERVALO';
+      else punchType = 'SAIDA';
+    }
+
+    const maxNsr = params.existingPunches.reduce((max, p) => Math.max(max, p.nsr || 0), 1000);
+    const newNsr = maxNsr + 1;
+    const punchId = `punch-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+
+    const payload = {
+      id: punchId,
+      employee_id: employee.id,
+      employee_name: employee.name,
+      date: dateStr,
+      time: timeStr,
+      timestamp: timestampStr,
+      type: punchType,
+      source: 'RELOGIO_DIGITAL',
+      nsr: newNsr,
+      notes: params.notes || null,
+      device: 'PORTAL_WEB',
+      created_at: new Date().toISOString(),
+    };
+
+    const { error } = await supabase.from('time_punches').insert(payload);
+    if (error) throw error;
+
+    return { success: true, punch: mapPunchRow(payload) };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Erro ao registrar ponto no Supabase.' };
+  }
+}
+
+export async function dbUpdateDayPunches(params: {
+  employeeId: string;
+  date: string;
+  entry1?: string;
+  exit1?: string;
+  entry2?: string;
+  exit2?: string;
+  notes?: string;
+  employees: Employee[];
+  existingPunches: TimePunch[];
+}): Promise<{ success: boolean; createdPunches?: TimePunch[]; error?: string }> {
+  try {
+    const employee = params.employees.find(e => e.id === params.employeeId);
+    if (!employee) return { success: false, error: 'Colaborador não encontrado.' };
+
+    // 1. Remover batidas antigas daquele dia
+    const { error: delError } = await supabase
+      .from('time_punches')
+      .delete()
+      .eq('employee_id', params.employeeId)
+      .eq('date', params.date);
+    if (delError) throw delError;
+
+    // 2. Criar novas batidas configuradas
+    const newEntries: Array<{ type: PunchType; time: string }> = [];
+    if (params.entry1?.trim()) newEntries.push({ type: 'ENTRADA', time: params.entry1.trim() });
+    if (params.exit1?.trim()) newEntries.push({ type: 'SAIDA_INTERVALO', time: params.exit1.trim() });
+    if (params.entry2?.trim()) newEntries.push({ type: 'RETORNO_INTERVALO', time: params.entry2.trim() });
+    if (params.exit2?.trim()) newEntries.push({ type: 'SAIDA', time: params.exit2.trim() });
+
+    if (newEntries.length === 0) {
+      return { success: true, createdPunches: [] };
+    }
+
+    let currentNsr = params.existingPunches.reduce((max, p) => Math.max(max, p.nsr || 0), 1000);
+    const payloads = newEntries.map((e, idx) => {
+      currentNsr += 1;
+      return {
+        id: `punch-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 6)}`,
+        employee_id: employee.id,
+        employee_name: employee.name,
+        date: params.date,
+        time: e.time,
+        timestamp: `${params.date}T${e.time}:00.000Z`,
+        type: e.type,
+        source: 'AJUSTE_MANUAL',
+        nsr: currentNsr,
+        notes: params.notes || 'Ajuste de espelho de ponto',
+        device: 'PAINEL_GESTOR',
+        created_at: new Date().toISOString(),
+      };
+    });
+
+    const { error: insError } = await supabase.from('time_punches').insert(payloads);
+    if (insError) throw insError;
+
+    return { success: true, createdPunches: payloads.map(mapPunchRow) };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Erro ao atualizar horários do dia no Supabase.' };
+  }
+}
+
+export async function dbDeleteEmployeePunchesForDate(
+  employeeId: string,
+  date: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { error } = await supabase
+      .from('time_punches')
+      .delete()
+      .eq('employee_id', employeeId)
+      .eq('date', date);
+    if (error) throw error;
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Erro ao remover horários do dia no Supabase.' };
+  }
+}
+
+// ==========================================
+// OPERAÇÕES EM VALES E ADIANTAMENTOS
+// ==========================================
+
+export async function dbCreateSalaryAdvance(
+  advance: Omit<SalaryAdvance, 'id' | 'createdAt'>
+): Promise<{ success: boolean; advance?: SalaryAdvance; error?: string }> {
+  try {
+    const id = `adv-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    const nowISO = new Date().toISOString();
+    const payload = {
+      id,
+      employee_id: advance.employeeId,
+      employee_name: advance.employeeName,
+      employee_registration: advance.employeeRegistration,
+      employee_role: advance.employeeRole || null,
+      employee_department: advance.employeeDepartment || null,
+      date: advance.date,
+      competence_month: advance.competenceMonth,
+      amount: advance.amount,
+      payment_method: advance.paymentMethod,
+      category: advance.category || 'OUTRO',
+      reason: advance.reason,
+      status: advance.status,
+      approved_by: advance.approvedBy || null,
+      receipt_signed: advance.receiptSigned ?? false,
+      notes: advance.notes || null,
+      created_at: nowISO,
+    };
+
+    const { error } = await supabase.from('salary_advances').insert(payload);
+    if (error) throw error;
+    return { success: true, advance: mapAdvanceRow(payload) };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Erro ao registrar vale no Supabase.' };
+  }
+}
+
+export async function dbUpdateSalaryAdvance(
+  advance: SalaryAdvance
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const payload = {
+      employee_id: advance.employeeId,
+      employee_name: advance.employeeName,
+      employee_registration: advance.employeeRegistration,
+      employee_role: advance.employeeRole || null,
+      employee_department: advance.employeeDepartment || null,
+      date: advance.date,
+      competence_month: advance.competenceMonth,
+      amount: advance.amount,
+      payment_method: advance.paymentMethod,
+      category: advance.category || 'OUTRO',
+      reason: advance.reason,
+      status: advance.status,
+      approved_by: advance.approvedBy || null,
+      receipt_signed: advance.receiptSigned ?? false,
+      notes: advance.notes || null,
+    };
+
+    const { error } = await supabase.from('salary_advances').update(payload).eq('id', advance.id);
+    if (error) throw error;
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Erro ao atualizar vale no Supabase.' };
+  }
+}
+
+export async function dbDeleteSalaryAdvance(id: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { error } = await supabase.from('salary_advances').delete().eq('id', id);
+    if (error) throw error;
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Erro ao excluir vale do Supabase.' };
+  }
+}
+
+// ==========================================
+// OPERAÇÕES EM FATURAMENTOS DE OS (BILLINGS)
+// ==========================================
+
+export async function dbCreateBilling(
+  data: Omit<BillingRecord, 'id' | 'createdAt' | 'grandTotal'>
+): Promise<{ success: boolean; record?: BillingRecord; error?: string }> {
+  try {
+    const id = `bill-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    const products = Number(data.productsTotal) || 0;
+    const alignment = Number(data.alignmentBalancingTotal) || 0;
+    const services = Number(data.servicesTotal) || 0;
+    const grandTotal = Math.round((products + alignment + services) * 100) / 100;
+    const nowISO = new Date().toISOString();
+
+    const payload = {
+      id,
+      date: data.date,
+      service_order_number: data.serviceOrderNumber.trim(),
+      collaborator_name: data.collaboratorName?.trim() || null,
+      collaborator_id: data.collaboratorId?.trim() || null,
+      products_total: products,
+      alignment_balancing_total: alignment,
+      services_total: services,
+      grand_total: grandTotal,
+      customer_name: data.customerName?.trim() || null,
+      vehicle_plate: data.vehiclePlate?.trim().toUpperCase() || null,
+      vehicle_model: data.vehicleModel?.trim() || null,
+      payment_method: data.paymentMethod || 'PIX',
+      notes: data.notes?.trim() || null,
+      created_at: nowISO,
+      updated_at: nowISO,
+    };
+
+    const { error } = await supabase.from('billings').insert(payload);
+    if (error) throw error;
+    return { success: true, record: mapBillingRow(payload) };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Erro ao salvar faturamento no Supabase.' };
+  }
+}
+
+export async function dbUpdateBilling(
+  id: string,
+  data: Partial<Omit<BillingRecord, 'id' | 'createdAt'>>
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const payload: any = {
+      updated_at: new Date().toISOString(),
+    };
+    if (data.date !== undefined) payload.date = data.date;
+    if (data.serviceOrderNumber !== undefined) payload.service_order_number = data.serviceOrderNumber;
+    if (data.collaboratorName !== undefined) payload.collaborator_name = data.collaboratorName || null;
+    if (data.collaboratorId !== undefined) payload.collaborator_id = data.collaboratorId || null;
+    if (data.productsTotal !== undefined) payload.products_total = Number(data.productsTotal) || 0;
+    if (data.alignmentBalancingTotal !== undefined) payload.alignment_balancing_total = Number(data.alignmentBalancingTotal) || 0;
+    if (data.servicesTotal !== undefined) payload.services_total = Number(data.servicesTotal) || 0;
+    if (data.grandTotal !== undefined) payload.grand_total = Number(data.grandTotal) || 0;
+    if (data.customerName !== undefined) payload.customer_name = data.customerName || null;
+    if (data.vehiclePlate !== undefined) payload.vehicle_plate = data.vehiclePlate?.toUpperCase() || null;
+    if (data.vehicleModel !== undefined) payload.vehicle_model = data.vehicleModel || null;
+    if (data.paymentMethod !== undefined) payload.payment_method = data.paymentMethod;
+    if (data.notes !== undefined) payload.notes = data.notes || null;
+
+    const { error } = await supabase.from('billings').update(payload).eq('id', id);
+    if (error) throw error;
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Erro ao atualizar faturamento no Supabase.' };
+  }
+}
+
+export async function dbDeleteBilling(id: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { error } = await supabase.from('billings').delete().eq('id', id);
+    if (error) throw error;
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Erro ao excluir faturamento do Supabase.' };
+  }
+}
+
+// ==========================================
+// OPERAÇÕES EM DESPESAS (EXPENSES)
+// ==========================================
+
+export async function dbCreateExpense(
+  expenseData: Omit<ExpenseRecord, 'id' | 'createdAt'>
+): Promise<{ success: boolean; expense?: ExpenseRecord; error?: string }> {
+  try {
+    const id = `exp-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    const nowISO = new Date().toISOString();
+    const payload = {
+      id,
+      description: expenseData.description.trim(),
+      category: expenseData.category,
+      custom_category_name: expenseData.customCategoryName?.trim() || null,
+      amount: Number(expenseData.amount) || 0,
+      due_date: expenseData.dueDate,
+      payment_date: expenseData.paymentDate || null,
+      payment_time: expenseData.paymentTime || null,
+      competence_month: expenseData.competenceMonth || expenseData.dueDate.substring(0, 7),
+      status: expenseData.status,
+      payment_method: expenseData.paymentMethod || 'BOLETO',
+      supplier_or_beneficiary: expenseData.supplierOrBeneficiary?.trim() || null,
+      document_number: expenseData.documentNumber?.trim() || null,
+      notes: expenseData.notes?.trim() || null,
+      is_recurring: Boolean(expenseData.isRecurring),
+      created_at: nowISO,
+      updated_at: nowISO,
+    };
+
+    const { error } = await supabase.from('expenses').insert(payload);
+    if (error) throw error;
+    return { success: true, expense: mapExpenseRow(payload) };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Erro ao lançar despesa no Supabase.' };
+  }
+}
+
+export async function dbUpdateExpense(
+  id: string,
+  data: Partial<ExpenseRecord>
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const payload: any = {
+      updated_at: new Date().toISOString(),
+    };
+    if (data.description !== undefined) payload.description = data.description;
+    if (data.category !== undefined) payload.category = data.category;
+    if (data.customCategoryName !== undefined) payload.custom_category_name = data.customCategoryName || null;
+    if (data.amount !== undefined) payload.amount = Number(data.amount) || 0;
+    if (data.dueDate !== undefined) payload.due_date = data.dueDate;
+    if (data.paymentDate !== undefined) payload.payment_date = data.paymentDate || null;
+    if (data.paymentTime !== undefined) payload.payment_time = data.paymentTime || null;
+    if (data.competenceMonth !== undefined) payload.competence_month = data.competenceMonth;
+    if (data.status !== undefined) payload.status = data.status;
+    if (data.paymentMethod !== undefined) payload.payment_method = data.paymentMethod;
+    if (data.supplierOrBeneficiary !== undefined) payload.supplier_or_beneficiary = data.supplierOrBeneficiary || null;
+    if (data.documentNumber !== undefined) payload.document_number = data.documentNumber || null;
+    if (data.notes !== undefined) payload.notes = data.notes || null;
+    if (data.isRecurring !== undefined) payload.is_recurring = Boolean(data.isRecurring);
+
+    const { error } = await supabase.from('expenses').update(payload).eq('id', id);
+    if (error) throw error;
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Erro ao atualizar despesa no Supabase.' };
+  }
+}
+
+export async function dbDeleteExpense(id: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { error } = await supabase.from('expenses').delete().eq('id', id);
+    if (error) throw error;
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Erro ao excluir despesa do Supabase.' };
+  }
+}
+
+// ==========================================
+// OPERAÇÕES EM CONFIGURAÇÕES DA EMPRESA
+// ==========================================
+
+export async function dbSaveCompanySettings(
+  settings: CompanySettings
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const payload = {
+      id: 'default_company',
+      name: settings.name,
+      trade_name: settings.tradeName,
+      cnpj: settings.cnpj,
+      state_registration: settings.stateRegistration || null,
+      phone: settings.phone || null,
+      email: settings.email || null,
+      address: settings.address || null,
+      city_state: settings.cityState || null,
+      logo_url: settings.logoUrl || null,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { error } = await supabase.from('company_settings').upsert(payload, { onConflict: 'id' });
+    if (error) throw error;
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Erro ao salvar configurações da empresa no Supabase.' };
+  }
+}
+
+// ==========================================
+// TESTES E SCHEMAS SQL
+// ==========================================
 
 export interface ConnectionTestResult {
   success: boolean;
   message: string;
   latencyMs?: number;
   tablesStatus?: Record<string, boolean>;
-  tablesErrors?: Record<string, string>;
-  totalTables?: number;
-  activeTablesCount?: number;
 }
 
-// Mapa de detalhes e erros da última sincronização
-export const lastSyncErrors: Record<string, string> = {};
-
-export const MONITORED_TABLES: { key: string; label: string; desc: string }[] = [
-  { key: 'products', label: '1. Produtos & Estoque', desc: 'Cadastro de itens, custos médios e estoques' },
-  { key: 'stock_movements', label: '2. Movimentações (Kardex)', desc: 'Entradas, saídas e rastreamento de estoque' },
-  { key: 'invoices', label: '3. Notas Fiscais (NF-e)', desc: 'Entradas manuais e via XML (Parnarama/Teresina)' },
-  { key: 'employees', label: '4. Colaboradores', desc: 'Registro de equipe, cargos e departamentos' },
-  { key: 'time_punches', label: '5. Ponto Eletrônico (REP-P)', desc: 'Batidas digitais com NSR e comprovante' },
-  { key: 'salary_advances', label: '6. Vales & Adiantamentos', desc: 'Vales salariais e baixas financeiras' },
-  { key: 'company_settings', label: '7. Dados da Empresa', desc: 'Identificação Lord Lub, CNPJ e contato' },
-  { key: 'billings', label: '8. Faturamentos (OS)', desc: 'Ordens de serviço e faturamento da oficina' },
-  { key: 'expenses', label: '9. Despesas & Contas a Pagar', desc: 'Despesas fixas, variáveis e centros de custo' },
-  { key: 'boletos', label: '10. Boletos Bancários', desc: 'Controle de duplicatas, códigos de barra e baixas' },
-];
-
-// Testa a conectividade com o Supabase e o status individual de cada uma das 10 tabelas
 export async function testSupabaseConnection(): Promise<ConnectionTestResult> {
   const start = performance.now();
+  const tables = [
+    'products',
+    'stock_movements',
+    'invoices',
+    'employees',
+    'time_punches',
+    'salary_advances',
+    'company_settings',
+    'billings',
+    'expenses'
+  ];
 
   try {
-    const tablePromises = MONITORED_TABLES.map(async ({ key, label }) => {
-      try {
-        const { error } = await supabase.from(key).select('id').limit(1);
-        return {
-          key,
-          label,
-          ok: !error,
-          error: error ? `${error.message}${error.details ? ` (${error.details})` : ''}` : undefined,
-        };
-      } catch (err: any) {
-        return {
-          key,
-          label,
-          ok: false,
-          error: err?.message || 'Falha de requisição',
-        };
-      }
+    const tablePromises = tables.map(async (table) => {
+      const { error } = await supabase.from(table).select('id').limit(1);
+      return { table, ok: !error };
     });
 
     const results = await Promise.all(tablePromises);
     const latencyMs = Math.round(performance.now() - start);
     const tablesStatus: Record<string, boolean> = {};
-    const tablesErrors: Record<string, string> = {};
-    let activeCount = 0;
+    let allOk = true;
 
     for (const r of results) {
-      tablesStatus[r.key] = r.ok;
-      if (r.ok) {
-        activeCount++;
-      } else {
-        tablesErrors[r.key] = r.error || 'Tabela não encontrada no schema público';
-      }
+      tablesStatus[r.table] = r.ok;
+      if (!r.ok) allOk = false;
     }
 
-    const allOk = activeCount === MONITORED_TABLES.length;
-    let message = '';
     if (allOk) {
-      message = `Todas as ${MONITORED_TABLES.length} tabelas estão ativas e sincronizando com o Supabase!`;
+      return {
+        success: true,
+        message: 'Todas as tabelas estão criadas, conectadas e operacionais no Supabase!',
+        latencyMs,
+        tablesStatus,
+      };
     } else {
-      const missingKeys = Object.entries(tablesStatus)
-        .filter(([_, ok]) => !ok)
-        .map(([k]) => k);
-      message = `${activeCount} de ${MONITORED_TABLES.length} tabelas conectadas. As tabelas [${missingKeys.join(', ')}] precisam ser criadas ou atualizadas no Supabase SQL Editor.`;
+      return {
+        success: true,
+        message: `Conectado ao Supabase com ${Object.values(tablesStatus).filter(Boolean).length} tabelas ativas.`,
+        latencyMs,
+        tablesStatus,
+      };
     }
-
-    return {
-      success: allOk,
-      message,
-      latencyMs,
-      tablesStatus,
-      tablesErrors,
-      totalTables: MONITORED_TABLES.length,
-      activeTablesCount: activeCount,
-    };
   } catch (err: any) {
     const latencyMs = Math.round(performance.now() - start);
     return {
       success: false,
-      message: err.message || 'Falha ao conectar com o servidor do Supabase. Verifique sua conexão com a internet.',
+      message: err.message || 'Falha ao conectar com o servidor do Supabase.',
       latencyMs,
-      tablesStatus: {},
-      tablesErrors: {},
-      totalTables: MONITORED_TABLES.length,
-      activeTablesCount: 0,
     };
   }
 }
 
-// ========================================================
-// SCRIPTS SQL OFICIAIS PARA O SUPABASE SQL EDITOR
-// ========================================================
-
-// 1. SCRIPT DE ATUALIZAÇÃO E CORREÇÃO (NÃO APAGA NENHUM DADO, CRIA AS TABELAS NOVAS E ADICIONA AS COLUNAS)
-export const UPDATE_MIGRATION_SQL = `-- ========================================================
--- SCRIPT DE ATUALIZAÇÃO E CORREÇÃO DE TABELAS (SEM PERDA DE DADOS)
--- Lord Lub - Atualização do Banco PostgreSQL no Supabase
--- Cole no SQL Editor do Supabase e clique em 'RUN'
--- ========================================================
-
--- 1. Cria a Tabela de Faturamento de Ordens de Serviço (OS) caso não exista
-CREATE TABLE IF NOT EXISTS public.billings (
-  id TEXT PRIMARY KEY,
-  date TEXT NOT NULL,
-  service_order_number TEXT NOT NULL,
-  collaborator_name TEXT,
-  collaborator_id TEXT,
-  products_total NUMERIC NOT NULL DEFAULT 0,
-  alignment_balancing_total NUMERIC NOT NULL DEFAULT 0,
-  services_total NUMERIC NOT NULL DEFAULT 0,
-  grand_total NUMERIC NOT NULL DEFAULT 0,
-  customer_name TEXT,
-  vehicle_plate TEXT,
-  vehicle_model TEXT,
-  payment_method TEXT DEFAULT 'PIX',
-  notes TEXT,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
-);
-
--- Garante suporte às colunas de colaborador na tabela billings
-ALTER TABLE public.billings ADD COLUMN IF NOT EXISTS collaborator_name TEXT;
-ALTER TABLE public.billings ADD COLUMN IF NOT EXISTS collaborator_id TEXT;
-
--- 2. Cria a Tabela de Despesas & Contas a Pagar
-CREATE TABLE IF NOT EXISTS public.expenses (
-  id TEXT PRIMARY KEY,
-  description TEXT NOT NULL,
-  category TEXT NOT NULL DEFAULT 'OUTRAS',
-  custom_category_name TEXT,
-  amount NUMERIC NOT NULL DEFAULT 0,
-  due_date TEXT NOT NULL,
-  payment_date TEXT,
-  payment_time TEXT,
-  competence_month TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'PENDENTE',
-  payment_method TEXT NOT NULL DEFAULT 'BOLETO',
-  supplier_or_beneficiary TEXT,
-  document_number TEXT,
-  notes TEXT,
-  is_recurring BOOLEAN DEFAULT false,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
-);
-
--- 3. Cria a Tabela de Boletos Bancários & Duplicatas
-CREATE TABLE IF NOT EXISTS public.boletos (
-  id TEXT PRIMARY KEY,
-  invoice_id TEXT,
-  invoice_number TEXT,
-  supplier_name TEXT,
-  supplier_cnpj TEXT,
-  destination_branch TEXT,
-  barcode TEXT NOT NULL,
-  amount NUMERIC NOT NULL DEFAULT 0,
-  due_date TEXT NOT NULL,
-  installment_number NUMERIC DEFAULT 1,
-  total_installments NUMERIC DEFAULT 1,
-  status TEXT NOT NULL DEFAULT 'PENDENTE',
-  paid_at TEXT,
-  payment_time TEXT,
-  paid_amount NUMERIC,
-  payment_method TEXT,
-  notes TEXT,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
-);
-
--- 4. Adiciona colunas de Destino da Mercadoria (Parnarama/Teresina) e Boletos na tabela de Notas Fiscais
-ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS destination_branch TEXT;
-ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS boletos JSONB DEFAULT '[]'::jsonb;
-
--- 5. Habilitar Row Level Security (RLS) nas novas tabelas
-ALTER TABLE public.billings ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.expenses ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.boletos ENABLE ROW LEVEL SECURITY;
-
--- 6. Políticas de Acesso Público para as novas tabelas
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'billings' AND policyname = 'Permitir leitura publica de faturamentos') THEN
-    CREATE POLICY "Permitir leitura publica de faturamentos" ON public.billings FOR SELECT USING (true);
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'billings' AND policyname = 'Permitir gravacao publica de faturamentos') THEN
-    CREATE POLICY "Permitir gravacao publica de faturamentos" ON public.billings FOR ALL USING (true);
-  END IF;
-
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'expenses' AND policyname = 'Permitir leitura publica de despesas') THEN
-    CREATE POLICY "Permitir leitura publica de despesas" ON public.expenses FOR SELECT USING (true);
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'expenses' AND policyname = 'Permitir gravacao publica de despesas') THEN
-    CREATE POLICY "Permitir gravacao publica de despesas" ON public.expenses FOR ALL USING (true);
-  END IF;
-
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'boletos' AND policyname = 'Permitir leitura publica de boletos') THEN
-    CREATE POLICY "Permitir leitura publica de boletos" ON public.boletos FOR SELECT USING (true);
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'boletos' AND policyname = 'Permitir gravacao publica de boletos') THEN
-    CREATE POLICY "Permitir gravacao publica de boletos" ON public.boletos FOR ALL USING (true);
-  END IF;
-END $$;
-`;
-
-// 2. SCRIPT SQL COMPLETO (TODAS AS 10 TABELAS DO SISTEMA)
-export const SUPABASE_SQL_SCHEMA = `-- ========================================================
--- SCHEMA COMPLETO GESTÃO LORD LUB - SUPABASE POSTGRESQL (10 TABELAS)
--- Cole este script no Supabase -> SQL Editor e clique em 'RUN'
--- ========================================================
-
--- 1. TABELA DE PRODUTOS E ESTOQUE
+export const SUPABASE_SQL_SCHEMA = `-- SCHEMA OFICIAL SUPABASE
+-- Execute no SQL Editor do Supabase se necessário
 CREATE TABLE IF NOT EXISTS public.products (
   id TEXT PRIMARY KEY,
   code TEXT NOT NULL,
@@ -273,10 +1355,9 @@ CREATE TABLE IF NOT EXISTS public.products (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- 2. TABELA DE MOVIMENTAÇÕES DE ESTOQUE (KARDEX)
 CREATE TABLE IF NOT EXISTS public.stock_movements (
   id TEXT PRIMARY KEY,
-  product_id TEXT NOT NULL,
+  product_id TEXT NOT NULL REFERENCES public.products(id) ON DELETE CASCADE,
   product_name TEXT NOT NULL,
   type TEXT NOT NULL,
   quantity NUMERIC NOT NULL,
@@ -292,7 +1373,6 @@ CREATE TABLE IF NOT EXISTS public.stock_movements (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- 3. TABELA DE NOTAS FISCAIS ELETRÔNICAS (NF-E)
 CREATE TABLE IF NOT EXISTS public.invoices (
   id TEXT PRIMARY KEY,
   number TEXT NOT NULL,
@@ -300,17 +1380,14 @@ CREATE TABLE IF NOT EXISTS public.invoices (
   issue_date TEXT NOT NULL,
   entry_date TEXT NOT NULL,
   access_key TEXT NOT NULL,
-  destination_branch TEXT,
   supplier JSONB NOT NULL,
   recipient JSONB,
   totals JSONB NOT NULL,
   items JSONB NOT NULL,
-  boletos JSONB DEFAULT '[]'::jsonb,
   status TEXT NOT NULL DEFAULT 'CONFIRMADA',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- 4. TABELA DE COLABORADORES
 CREATE TABLE IF NOT EXISTS public.employees (
   id TEXT PRIMARY KEY,
   registration_number TEXT NOT NULL,
@@ -330,10 +1407,9 @@ CREATE TABLE IF NOT EXISTS public.employees (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- 5. TABELA DE BATIDAS DE PONTO ELETRÔNICO (REP-P)
 CREATE TABLE IF NOT EXISTS public.time_punches (
   id TEXT PRIMARY KEY,
-  employee_id TEXT NOT NULL,
+  employee_id TEXT NOT NULL REFERENCES public.employees(id) ON DELETE CASCADE,
   employee_name TEXT NOT NULL,
   date TEXT NOT NULL,
   time TEXT NOT NULL,
@@ -346,10 +1422,9 @@ CREATE TABLE IF NOT EXISTS public.time_punches (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- 6. TABELA DE VALES E ADIANTAMENTOS SALARIAIS
 CREATE TABLE IF NOT EXISTS public.salary_advances (
   id TEXT PRIMARY KEY,
-  employee_id TEXT NOT NULL,
+  employee_id TEXT NOT NULL REFERENCES public.employees(id) ON DELETE CASCADE,
   employee_name TEXT NOT NULL,
   employee_registration TEXT NOT NULL,
   employee_role TEXT,
@@ -367,7 +1442,6 @@ CREATE TABLE IF NOT EXISTS public.salary_advances (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- 7. TABELA DE CONFIGURAÇÕES DA EMPRESA (LORD LUB)
 CREATE TABLE IF NOT EXISTS public.company_settings (
   id TEXT PRIMARY KEY DEFAULT 'default_company',
   name TEXT NOT NULL,
@@ -382,7 +1456,6 @@ CREATE TABLE IF NOT EXISTS public.company_settings (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- 8. TABELA DE FATURAMENTO DE ORDENS DE SERVIÇO (OS)
 CREATE TABLE IF NOT EXISTS public.billings (
   id TEXT PRIMARY KEY,
   date TEXT NOT NULL,
@@ -402,11 +1475,10 @@ CREATE TABLE IF NOT EXISTS public.billings (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- 9. TABELA DE DESPESAS E CONTAS A PAGAR
 CREATE TABLE IF NOT EXISTS public.expenses (
   id TEXT PRIMARY KEY,
   description TEXT NOT NULL,
-  category TEXT NOT NULL DEFAULT 'OUTRAS',
+  category TEXT NOT NULL,
   custom_category_name TEXT,
   amount NUMERIC NOT NULL DEFAULT 0,
   due_date TEXT NOT NULL,
@@ -422,501 +1494,10 @@ CREATE TABLE IF NOT EXISTS public.expenses (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
-
--- 10. TABELA DE BOLETOS BANCÁRIOS
-CREATE TABLE IF NOT EXISTS public.boletos (
-  id TEXT PRIMARY KEY,
-  invoice_id TEXT,
-  invoice_number TEXT,
-  supplier_name TEXT,
-  supplier_cnpj TEXT,
-  destination_branch TEXT,
-  barcode TEXT NOT NULL,
-  amount NUMERIC NOT NULL DEFAULT 0,
-  due_date TEXT NOT NULL,
-  installment_number NUMERIC DEFAULT 1,
-  total_installments NUMERIC DEFAULT 1,
-  status TEXT NOT NULL DEFAULT 'PENDENTE',
-  paid_at TEXT,
-  payment_time TEXT,
-  paid_amount NUMERIC,
-  payment_method TEXT,
-  notes TEXT,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
-);
-
--- Garante suporte às colunas adicionais caso tabelas já existam
-ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS destination_branch TEXT;
-ALTER TABLE public.invoices ADD COLUMN IF NOT EXISTS boletos JSONB DEFAULT '[]'::jsonb;
-ALTER TABLE public.billings ADD COLUMN IF NOT EXISTS collaborator_name TEXT;
-ALTER TABLE public.billings ADD COLUMN IF NOT EXISTS collaborator_id TEXT;
-
--- Habilitar Row Level Security (RLS) nas 10 tabelas
-ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.stock_movements ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.invoices ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.employees ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.time_punches ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.salary_advances ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.company_settings ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.billings ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.expenses ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.boletos ENABLE ROW LEVEL SECURITY;
-
--- Políticas de Leitura e Escrita Públicas (Chave Anon/Publishable)
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'products' AND policyname = 'Permitir leitura publica de produtos') THEN
-    CREATE POLICY "Permitir leitura publica de produtos" ON public.products FOR SELECT USING (true);
-    CREATE POLICY "Permitir gravacao publica de produtos" ON public.products FOR ALL USING (true);
-  END IF;
-
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'stock_movements' AND policyname = 'Permitir leitura publica de movimentacoes') THEN
-    CREATE POLICY "Permitir leitura publica de movimentacoes" ON public.stock_movements FOR SELECT USING (true);
-    CREATE POLICY "Permitir gravacao publica de movimentacoes" ON public.stock_movements FOR ALL USING (true);
-  END IF;
-
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'invoices' AND policyname = 'Permitir leitura publica de notas fiscais') THEN
-    CREATE POLICY "Permitir leitura publica de notas fiscais" ON public.invoices FOR SELECT USING (true);
-    CREATE POLICY "Permitir gravacao publica de notas fiscais" ON public.invoices FOR ALL USING (true);
-  END IF;
-
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'employees' AND policyname = 'Permitir leitura publica de colaboradores') THEN
-    CREATE POLICY "Permitir leitura publica de colaboradores" ON public.employees FOR SELECT USING (true);
-    CREATE POLICY "Permitir gravacao publica de colaboradores" ON public.employees FOR ALL USING (true);
-  END IF;
-
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'time_punches' AND policyname = 'Permitir leitura publica de pontos') THEN
-    CREATE POLICY "Permitir leitura publica de pontos" ON public.time_punches FOR SELECT USING (true);
-    CREATE POLICY "Permitir gravacao publica de pontos" ON public.time_punches FOR ALL USING (true);
-  END IF;
-
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'salary_advances' AND policyname = 'Permitir leitura publica de vales') THEN
-    CREATE POLICY "Permitir leitura publica de vales" ON public.salary_advances FOR SELECT USING (true);
-    CREATE POLICY "Permitir gravacao publica de vales" ON public.salary_advances FOR ALL USING (true);
-  END IF;
-
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'company_settings' AND policyname = 'Permitir leitura publica de config empresa') THEN
-    CREATE POLICY "Permitir leitura publica de config empresa" ON public.company_settings FOR SELECT USING (true);
-    CREATE POLICY "Permitir gravacao publica de config empresa" ON public.company_settings FOR ALL USING (true);
-  END IF;
-
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'billings' AND policyname = 'Permitir leitura publica de faturamentos') THEN
-    CREATE POLICY "Permitir leitura publica de faturamentos" ON public.billings FOR SELECT USING (true);
-    CREATE POLICY "Permitir gravacao publica de faturamentos" ON public.billings FOR ALL USING (true);
-  END IF;
-
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'expenses' AND policyname = 'Permitir leitura publica de despesas') THEN
-    CREATE POLICY "Permitir leitura publica de despesas" ON public.expenses FOR SELECT USING (true);
-    CREATE POLICY "Permitir gravacao publica de despesas" ON public.expenses FOR ALL USING (true);
-  END IF;
-
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'boletos' AND policyname = 'Permitir leitura publica de boletos') THEN
-    CREATE POLICY "Permitir leitura publica de boletos" ON public.boletos FOR SELECT USING (true);
-    CREATE POLICY "Permitir gravacao publica de boletos" ON public.boletos FOR ALL USING (true);
-  END IF;
-END $$;
 `;
 
-export const BILLING_TABLE_ONLY_SQL = UPDATE_MIGRATION_SQL;
+export const BILLING_TABLE_ONLY_SQL = SUPABASE_SQL_SCHEMA;
 
-// ==========================================
-// FUNÇÕES DE SINCRONIZAÇÃO BIDIRECIONAL
-// ==========================================
-
-// 1. Envia os produtos para o Supabase
-export async function syncProductsToSupabase(products: Product[]): Promise<boolean> {
-  if (!products || products.length === 0) return true;
-  try {
-    const payload = products.map(p => ({
-      id: p.id,
-      code: p.code,
-      name: p.name,
-      category: p.category || 'Geral',
-      unit: p.unit || 'UN',
-      ncm: p.ncm || null,
-      current_stock: Number(p.currentStock) || 0,
-      min_stock: Number(p.minStock) || 0,
-      average_cost: Number(p.averageCost) || 0,
-      last_cost: Number(p.lastCost) || 0,
-      selling_price: p.sellingPrice !== undefined ? Number(p.sellingPrice) : null,
-      margin_percent: p.marginPercent !== undefined ? Number(p.marginPercent) : null,
-      location: p.location || null,
-      updated_at: p.updatedAt || new Date().toISOString()
-    }));
-
-    const { error } = await supabase.from('products').upsert(payload, { onConflict: 'id' });
-    if (error) {
-      console.warn('Erro ao sincronizar produtos com Supabase:', error.message);
-      lastSyncErrors['products'] = error.message;
-      return false;
-    }
-    delete lastSyncErrors['products'];
-    return true;
-  } catch (err: any) {
-    console.warn('Falha na sincronização de produtos:', err);
-    lastSyncErrors['products'] = err?.message || 'Falha de rede';
-    return false;
-  }
-}
-
-// 2. Envia movimentações de estoque para o Supabase
-export async function syncMovementsToSupabase(movements: StockMovement[]): Promise<boolean> {
-  if (!movements || movements.length === 0) return true;
-  try {
-    const payload = movements.map(m => ({
-      id: m.id,
-      product_id: m.productId,
-      product_name: m.productName,
-      type: m.type,
-      quantity: Number(m.quantity) || 0,
-      unit_cost: Number(m.unitCost) || 0,
-      total_cost: Number(m.totalCost) || 0,
-      resulting_stock: Number(m.resultingStock) || 0,
-      resulting_average_cost: Number(m.resultingAverageCost) || 0,
-      date: m.date,
-      document_number: m.documentNumber || null,
-      document_type: m.documentType || null,
-      notes: m.notes || null,
-      supplier_or_customer: m.supplierOrCustomer || null,
-    }));
-
-    const { error } = await supabase.from('stock_movements').upsert(payload, { onConflict: 'id' });
-    if (error) {
-      console.warn('Erro ao sincronizar movimentações com Supabase:', error.message);
-      lastSyncErrors['stock_movements'] = error.message;
-      return false;
-    }
-    delete lastSyncErrors['stock_movements'];
-    return true;
-  } catch (err: any) {
-    console.warn('Falha na sincronização de movimentações:', err);
-    lastSyncErrors['stock_movements'] = err?.message || 'Falha de rede';
-    return false;
-  }
-}
-
-// 3. Envia Notas Fiscais para o Supabase (com fallback resiliente de colunas)
-export async function syncInvoicesToSupabase(invoices: Invoice[]): Promise<boolean> {
-  if (!invoices || invoices.length === 0) return true;
-  try {
-    const payload = invoices.map(inv => ({
-      id: inv.id,
-      number: inv.number,
-      series: inv.series,
-      issue_date: inv.issueDate,
-      entry_date: inv.entryDate,
-      access_key: inv.accessKey,
-      destination_branch: inv.destinationBranch || null,
-      supplier: inv.supplier,
-      recipient: inv.recipient || null,
-      totals: inv.totals,
-      items: inv.items,
-      boletos: inv.boletos || [],
-      status: inv.status || 'CONFIRMADA',
-    }));
-
-    const { error } = await supabase.from('invoices').upsert(payload, { onConflict: 'id' });
-    if (error) {
-      // Se a tabela ainda não tiver as colunas destination_branch ou boletos no Supabase, tenta fallback sem elas
-      if (
-        error.message?.includes('destination_branch') ||
-        error.message?.includes('boletos') ||
-        (error as any)?.code === 'PGRST204'
-      ) {
-        const fallbackPayload = invoices.map(inv => ({
-          id: inv.id,
-          number: inv.number,
-          series: inv.series,
-          issue_date: inv.issueDate,
-          entry_date: inv.entryDate,
-          access_key: inv.accessKey,
-          supplier: inv.supplier,
-          recipient: inv.recipient || null,
-          totals: inv.totals,
-          items: inv.items,
-          status: inv.status || 'CONFIRMADA',
-        }));
-        const retry = await supabase.from('invoices').upsert(fallbackPayload, { onConflict: 'id' });
-        if (!retry.error) {
-          delete lastSyncErrors['invoices'];
-          return true;
-        }
-      }
-      console.warn('Erro ao sincronizar notas fiscais com Supabase:', error.message);
-      lastSyncErrors['invoices'] = error.message;
-      return false;
-    }
-    delete lastSyncErrors['invoices'];
-    return true;
-  } catch (err: any) {
-    console.warn('Falha na sincronização de notas:', err);
-    lastSyncErrors['invoices'] = err?.message || 'Falha de rede';
-    return false;
-  }
-}
-
-// 4. Envia Colaboradores para o Supabase
-export async function syncEmployeesToSupabase(employees: Employee[]): Promise<boolean> {
-  if (!employees || employees.length === 0) return true;
-  try {
-    const payload = employees.map(e => ({
-      id: e.id,
-      registration_number: e.registrationNumber,
-      name: e.name,
-      cpf: e.cpf,
-      role: e.role,
-      department: e.department,
-      work_shift: e.workShift || '08:00 às 17:00 (Segunda a Sexta)',
-      daily_hours_expected: Number(e.dailyHoursExpected) || 8,
-      pin: e.pin || null,
-      admission_date: e.admissionDate,
-      status: e.status || 'ATIVO',
-      hourly_rate: e.hourlyRate !== undefined ? Number(e.hourlyRate) : null,
-      avatar_initials: e.avatarInitials || null,
-      phone: e.phone || null,
-      email: e.email || null,
-      updated_at: new Date().toISOString(),
-    }));
-
-    const { error } = await supabase.from('employees').upsert(payload, { onConflict: 'id' });
-    if (error) {
-      console.warn('Erro ao sincronizar colaboradores com Supabase:', error.message);
-      lastSyncErrors['employees'] = error.message;
-      return false;
-    }
-    delete lastSyncErrors['employees'];
-    return true;
-  } catch (err: any) {
-    console.warn('Falha na sincronização de colaboradores:', err);
-    lastSyncErrors['employees'] = err?.message || 'Falha de rede';
-    return false;
-  }
-}
-
-// 5. Envia Batidas de Ponto para o Supabase
-export async function syncPunchesToSupabase(punches: TimePunch[]): Promise<boolean> {
-  if (!punches || punches.length === 0) return true;
-  try {
-    const payload = punches.map(p => ({
-      id: p.id,
-      employee_id: p.employeeId,
-      employee_name: p.employeeName,
-      date: p.date,
-      time: p.time,
-      timestamp: p.timestamp,
-      type: p.type,
-      source: p.source || 'RELOGIO_DIGITAL',
-      nsr: Number(p.nsr) || 0,
-      notes: p.notes || null,
-      device: p.device || null,
-    }));
-
-    const { error } = await supabase.from('time_punches').upsert(payload, { onConflict: 'id' });
-    if (error) {
-      console.warn('Erro ao sincronizar batidas de ponto com Supabase:', error.message);
-      lastSyncErrors['time_punches'] = error.message;
-      return false;
-    }
-    delete lastSyncErrors['time_punches'];
-    return true;
-  } catch (err: any) {
-    console.warn('Falha na sincronização de pontos:', err);
-    lastSyncErrors['time_punches'] = err?.message || 'Falha de rede';
-    return false;
-  }
-}
-
-// 6. Envia Vales e Adiantamentos para o Supabase
-export async function syncAdvancesToSupabase(advances: SalaryAdvance[]): Promise<boolean> {
-  if (!advances || advances.length === 0) return true;
-  try {
-    const payload = advances.map(a => ({
-      id: a.id,
-      employee_id: a.employeeId,
-      employee_name: a.employeeName,
-      employee_registration: a.employeeRegistration,
-      employee_role: a.employeeRole || null,
-      employee_department: a.employeeDepartment || null,
-      date: a.date,
-      competence_month: a.competenceMonth,
-      amount: Number(a.amount) || 0,
-      payment_method: a.paymentMethod || 'DINHEIRO',
-      category: a.category || 'OUTRO',
-      reason: a.reason || 'Adiantamento',
-      status: a.status || 'PENDENTE_DESCONTO',
-      approved_by: a.approvedBy || null,
-      receipt_signed: Boolean(a.receiptSigned),
-      notes: a.notes || null,
-    }));
-
-    const { error } = await supabase.from('salary_advances').upsert(payload, { onConflict: 'id' });
-    if (error) {
-      console.warn('Erro ao sincronizar vales com Supabase:', error.message);
-      lastSyncErrors['salary_advances'] = error.message;
-      return false;
-    }
-    delete lastSyncErrors['salary_advances'];
-    return true;
-  } catch (err: any) {
-    console.warn('Falha na sincronização de vales:', err);
-    lastSyncErrors['salary_advances'] = err?.message || 'Falha de rede';
-    return false;
-  }
-}
-
-// 7. Envia Dados da Empresa (Lord Lub) para o Supabase
-export async function syncCompanySettingsToSupabase(settings: CompanySettings): Promise<boolean> {
-  try {
-    const payload = {
-      id: 'default_company',
-      name: settings.name,
-      trade_name: settings.tradeName,
-      cnpj: settings.cnpj,
-      state_registration: settings.stateRegistration || null,
-      phone: settings.phone || null,
-      email: settings.email || null,
-      address: settings.address || null,
-      city_state: settings.cityState || null,
-      logo_url: settings.logoUrl || null,
-      updated_at: new Date().toISOString(),
-    };
-
-    const { error } = await supabase.from('company_settings').upsert(payload, { onConflict: 'id' });
-    if (error) {
-      console.warn('Erro ao sincronizar dados da empresa com Supabase:', error.message);
-      lastSyncErrors['company_settings'] = error.message;
-      return false;
-    }
-    delete lastSyncErrors['company_settings'];
-    return true;
-  } catch (err: any) {
-    console.warn('Falha na sincronização da empresa:', err);
-    lastSyncErrors['company_settings'] = err?.message || 'Falha de rede';
-    return false;
-  }
-}
-
-// 8. Envia Faturamentos de Ordens de Serviço (OS) para o Supabase
-export async function syncBillingsToSupabase(billings: BillingRecord[]): Promise<boolean> {
-  if (!billings || billings.length === 0) return true;
-  try {
-    const payload = billings.map(b => ({
-      id: b.id,
-      date: b.date,
-      service_order_number: b.serviceOrderNumber,
-      collaborator_name: b.collaboratorName || null,
-      collaborator_id: b.collaboratorId || null,
-      products_total: Number(b.productsTotal) || 0,
-      alignment_balancing_total: Number(b.alignmentBalancingTotal) || 0,
-      services_total: Number(b.servicesTotal) || 0,
-      grand_total: Number(b.grandTotal) || 0,
-      customer_name: b.customerName || null,
-      vehicle_plate: b.vehiclePlate || null,
-      vehicle_model: b.vehicleModel || null,
-      payment_method: b.paymentMethod || 'PIX',
-      notes: b.notes || null,
-      created_at: b.createdAt || new Date().toISOString(),
-      updated_at: b.updatedAt || new Date().toISOString(),
-    }));
-
-    const { error } = await supabase.from('billings').upsert(payload, { onConflict: 'id' });
-    if (error) {
-      console.warn('Erro ao sincronizar faturamentos com Supabase:', error.message);
-      lastSyncErrors['billings'] = error.message;
-      return false;
-    }
-    delete lastSyncErrors['billings'];
-    return true;
-  } catch (err: any) {
-    console.warn('Falha na sincronização de faturamentos:', err);
-    lastSyncErrors['billings'] = err?.message || 'Falha de rede';
-    return false;
-  }
-}
-
-// 9. Envia Despesas e Contas a Pagar para o Supabase
-export async function syncExpensesToSupabase(expenses: ExpenseRecord[]): Promise<boolean> {
-  if (!expenses || expenses.length === 0) return true;
-  try {
-    const payload = expenses.map(e => ({
-      id: e.id,
-      description: e.description,
-      category: e.category || 'OUTRAS',
-      custom_category_name: e.customCategoryName || null,
-      amount: Number(e.amount) || 0,
-      due_date: e.dueDate,
-      payment_date: e.paymentDate || null,
-      payment_time: e.paymentTime || null,
-      competence_month: e.competenceMonth,
-      status: e.status || 'PENDENTE',
-      payment_method: e.paymentMethod || 'BOLETO',
-      supplier_or_beneficiary: e.supplierOrBeneficiary || null,
-      document_number: e.documentNumber || null,
-      notes: e.notes || null,
-      is_recurring: Boolean(e.isRecurring),
-      created_at: e.createdAt || new Date().toISOString(),
-      updated_at: e.updatedAt || new Date().toISOString(),
-    }));
-
-    const { error } = await supabase.from('expenses').upsert(payload, { onConflict: 'id' });
-    if (error) {
-      console.warn('Erro ao sincronizar despesas com Supabase:', error.message);
-      lastSyncErrors['expenses'] = error.message;
-      return false;
-    }
-    delete lastSyncErrors['expenses'];
-    return true;
-  } catch (err: any) {
-    console.warn('Falha na sincronização de despesas:', err);
-    lastSyncErrors['expenses'] = err?.message || 'Falha de rede';
-    return false;
-  }
-}
-
-// 10. Envia Boletos Bancários para o Supabase
-export async function syncBoletosToSupabase(boletos: InvoiceBoleto[]): Promise<boolean> {
-  if (!boletos || boletos.length === 0) return true;
-  try {
-    const payload = boletos.map(b => ({
-      id: b.id,
-      invoice_id: b.invoiceId || null,
-      invoice_number: b.invoiceNumber || null,
-      supplier_name: b.supplierName || null,
-      supplier_cnpj: b.supplierCnpj || null,
-      destination_branch: b.destinationBranch || null,
-      barcode: b.barcode,
-      amount: Number(b.amount) || 0,
-      due_date: b.dueDate,
-      installment_number: Number(b.installmentNumber) || 1,
-      total_installments: Number(b.totalInstallments) || 1,
-      status: b.status || 'PENDENTE',
-      paid_at: b.paidAt || null,
-      payment_time: b.paymentTime || null,
-      paid_amount: b.paidAmount !== undefined ? Number(b.paidAmount) : null,
-      payment_method: b.paymentMethod || null,
-      notes: b.notes || null,
-      created_at: b.createdAt || new Date().toISOString(),
-      updated_at: b.updatedAt || new Date().toISOString(),
-    }));
-
-    const { error } = await supabase.from('boletos').upsert(payload, { onConflict: 'id' });
-    if (error) {
-      console.warn('Erro ao sincronizar boletos com Supabase:', error.message);
-      lastSyncErrors['boletos'] = error.message;
-      return false;
-    }
-    delete lastSyncErrors['boletos'];
-    return true;
-  } catch (err: any) {
-    console.warn('Falha na sincronização de boletos:', err);
-    lastSyncErrors['boletos'] = err?.message || 'Falha de rede';
-    return false;
-  }
-}
-
-// Realiza carga total de dados para o Supabase com relatório preciso
 export async function pushFullDatabaseToSupabase(data: {
   products: Product[];
   movements: StockMovement[];
@@ -926,359 +1507,76 @@ export async function pushFullDatabaseToSupabase(data: {
   advances: SalaryAdvance[];
   companySettings: CompanySettings;
   billings?: BillingRecord[];
-  expenses?: ExpenseRecord[];
-  boletos?: InvoiceBoleto[];
-}): Promise<{ success: boolean; errors: string[]; errorDetails: Record<string, string>; syncedCount: Record<string, number> }> {
+}): Promise<{ success: boolean; errors: string[] }> {
   const errors: string[] = [];
-  const errorDetails: Record<string, string> = {};
-  const syncedCount: Record<string, number> = {};
 
-  // 1. Produtos
-  const okProducts = await syncProductsToSupabase(data.products);
-  if (!okProducts) {
-    errors.push('Produtos');
-    errorDetails['products'] = lastSyncErrors['products'] || 'Erro ao gravar produtos';
-  } else {
-    syncedCount['products'] = data.products.length;
-  }
-
-  // 2. Movimentações
-  const okMovements = await syncMovementsToSupabase(data.movements);
-  if (!okMovements) {
-    errors.push('Movimentações');
-    errorDetails['stock_movements'] = lastSyncErrors['stock_movements'] || 'Erro ao gravar movimentações';
-  } else {
-    syncedCount['stock_movements'] = data.movements.length;
-  }
-
-  // 3. Notas Fiscais
-  const okInvoices = await syncInvoicesToSupabase(data.invoices);
-  if (!okInvoices) {
-    errors.push('Notas Fiscais');
-    errorDetails['invoices'] = lastSyncErrors['invoices'] || 'Erro ao gravar notas fiscais';
-  } else {
-    syncedCount['invoices'] = data.invoices.length;
-  }
-
-  // 4. Colaboradores
-  const okEmployees = await syncEmployeesToSupabase(data.employees);
-  if (!okEmployees) {
-    errors.push('Colaboradores');
-    errorDetails['employees'] = lastSyncErrors['employees'] || 'Erro ao gravar colaboradores';
-  } else {
-    syncedCount['employees'] = data.employees.length;
-  }
-
-  // 5. Ponto Eletrônico
-  const okPunches = await syncPunchesToSupabase(data.punches);
-  if (!okPunches) {
-    errors.push('Ponto Eletrônico');
-    errorDetails['time_punches'] = lastSyncErrors['time_punches'] || 'Erro ao gravar batidas de ponto';
-  } else {
-    syncedCount['time_punches'] = data.punches.length;
-  }
-
-  // 6. Vales
-  const okAdvances = await syncAdvancesToSupabase(data.advances);
-  if (!okAdvances) {
-    errors.push('Vales Salariais');
-    errorDetails['salary_advances'] = lastSyncErrors['salary_advances'] || 'Erro ao gravar vales';
-  } else {
-    syncedCount['salary_advances'] = data.advances.length;
-  }
-
-  // 7. Dados da Empresa
-  const okCompany = await syncCompanySettingsToSupabase(data.companySettings);
-  if (!okCompany) {
-    errors.push('Dados da Empresa');
-    errorDetails['company_settings'] = lastSyncErrors['company_settings'] || 'Erro ao gravar dados da empresa';
-  } else {
-    syncedCount['company_settings'] = 1;
-  }
-
-  // 8. Faturamentos (OS)
-  if (data.billings && data.billings.length > 0) {
-    const okBillings = await syncBillingsToSupabase(data.billings);
-    if (!okBillings) {
-      errors.push('Faturamentos (OS)');
-      errorDetails['billings'] = lastSyncErrors['billings'] || 'Tabela "billings" ausente no Supabase';
-    } else {
-      syncedCount['billings'] = data.billings.length;
+  try {
+    if (data.products && data.products.length > 0) {
+      const payload = data.products.map(p => ({
+        id: p.id,
+        code: p.code,
+        name: p.name,
+        category: p.category || 'Geral',
+        unit: p.unit || 'UN',
+        ncm: p.ncm || null,
+        current_stock: p.currentStock,
+        min_stock: p.minStock,
+        average_cost: p.averageCost,
+        last_cost: p.lastCost,
+        selling_price: p.sellingPrice || null,
+        margin_percent: p.marginPercent || null,
+        location: p.location || null,
+        updated_at: new Date().toISOString(),
+      }));
+      const { error } = await supabase.from('products').upsert(payload, { onConflict: 'id' });
+      if (error) errors.push(`Produtos: ${error.message}`);
     }
-  }
 
-  // 9. Despesas & Contas a Pagar
-  if (data.expenses && data.expenses.length > 0) {
-    const okExpenses = await syncExpensesToSupabase(data.expenses);
-    if (!okExpenses) {
-      errors.push('Despesas');
-      errorDetails['expenses'] = lastSyncErrors['expenses'] || 'Tabela "expenses" ausente no Supabase';
-    } else {
-      syncedCount['expenses'] = data.expenses.length;
+    if (data.employees && data.employees.length > 0) {
+      const payload = data.employees.map(e => ({
+        id: e.id,
+        registration_number: e.registrationNumber,
+        name: e.name,
+        cpf: e.cpf,
+        role: e.role,
+        department: e.department,
+        work_shift: e.workShift || '08:00 às 17:00 (Segunda a Sexta)',
+        daily_hours_expected: e.dailyHoursExpected || 8,
+        pin: e.pin || null,
+        admission_date: e.admissionDate,
+        status: e.status || 'ATIVO',
+        hourly_rate: e.hourlyRate || null,
+        avatar_initials: e.avatarInitials || null,
+        phone: e.phone || null,
+        email: e.email || null,
+        updated_at: new Date().toISOString(),
+      }));
+      const { error } = await supabase.from('employees').upsert(payload, { onConflict: 'id' });
+      if (error) errors.push(`Colaboradores: ${error.message}`);
     }
-  }
 
-  // 10. Boletos Bancários
-  if (data.boletos && data.boletos.length > 0) {
-    const okBoletos = await syncBoletosToSupabase(data.boletos);
-    if (!okBoletos) {
-      errors.push('Boletos Bancários');
-      errorDetails['boletos'] = lastSyncErrors['boletos'] || 'Tabela "boletos" ausente no Supabase';
-    } else {
-      syncedCount['boletos'] = data.boletos.length;
+    if (data.companySettings) {
+      const { error } = await supabase.from('company_settings').upsert({
+        id: 'default_company',
+        name: data.companySettings.name,
+        trade_name: data.companySettings.tradeName,
+        cnpj: data.companySettings.cnpj,
+        state_registration: data.companySettings.stateRegistration || null,
+        phone: data.companySettings.phone || null,
+        email: data.companySettings.email || null,
+        address: data.companySettings.address || null,
+        city_state: data.companySettings.cityState || null,
+        logo_url: data.companySettings.logoUrl || null,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'id' });
+      if (error) errors.push(`Empresa: ${error.message}`);
     }
+  } catch (err: any) {
+    errors.push(err.message || 'Erro inesperado durante sincronização.');
   }
 
   return {
     success: errors.length === 0,
     errors,
-    errorDetails,
-    syncedCount,
   };
-}
-
-// Puxa todos os dados do Supabase e converte para os formatos locais do aplicativo
-export async function pullFullDatabaseFromSupabase(): Promise<{
-  success: boolean;
-  data?: {
-    products: Product[];
-    movements: StockMovement[];
-    invoices: Invoice[];
-    employees: Employee[];
-    punches: TimePunch[];
-    advances: SalaryAdvance[];
-    companySettings?: CompanySettings;
-    billings: BillingRecord[];
-    expenses: ExpenseRecord[];
-    boletos: InvoiceBoleto[];
-  };
-  error?: string;
-}> {
-  try {
-    const [pRes, mRes, iRes, eRes, tpRes, saRes, csRes, bRes, expRes, bolRes] = await Promise.all([
-      supabase.from('products').select('*'),
-      supabase.from('stock_movements').select('*').order('created_at', { ascending: true }),
-      supabase.from('invoices').select('*').order('created_at', { ascending: false }),
-      supabase.from('employees').select('*'),
-      supabase.from('time_punches').select('*').order('nsr', { ascending: true }),
-      supabase.from('salary_advances').select('*').order('created_at', { ascending: false }),
-      supabase.from('company_settings').select('*').limit(1),
-      supabase.from('billings').select('*').order('date', { ascending: false }),
-      supabase.from('expenses').select('*').order('due_date', { ascending: true }),
-      supabase.from('boletos').select('*').order('due_date', { ascending: true }),
-    ]);
-
-    if (pRes.error) throw new Error(`Produtos: ${pRes.error.message}`);
-    if (mRes.error) throw new Error(`Movimentações: ${mRes.error.message}`);
-    if (iRes.error) throw new Error(`Notas: ${iRes.error.message}`);
-    if (eRes.error) throw new Error(`Colaboradores: ${eRes.error.message}`);
-    if (tpRes.error) throw new Error(`Pontos: ${tpRes.error.message}`);
-    if (saRes.error) throw new Error(`Vales: ${saRes.error.message}`);
-
-    const products: Product[] = (pRes.data || []).map((row: any) => ({
-      id: row.id,
-      code: row.code,
-      name: row.name,
-      category: row.category || 'Geral',
-      unit: row.unit || 'UN',
-      ncm: row.ncm || '',
-      currentStock: Number(row.current_stock) || 0,
-      minStock: Number(row.min_stock) || 0,
-      averageCost: Number(row.average_cost) || 0,
-      lastCost: Number(row.last_cost) || 0,
-      sellingPrice: row.selling_price ? Number(row.selling_price) : undefined,
-      marginPercent: row.margin_percent ? Number(row.margin_percent) : undefined,
-      location: row.location || undefined,
-      createdAt: row.created_at || row.updated_at || new Date().toISOString(),
-      updatedAt: row.updated_at || new Date().toISOString(),
-    }));
-
-    const movements: StockMovement[] = (mRes.data || []).map((row: any) => ({
-      id: row.id,
-      productId: row.product_id,
-      productCode: row.product_code || 'PROD',
-      productName: row.product_name,
-      unit: row.unit || 'UN',
-      type: row.type,
-      documentType: (row.document_type as any) || 'MANUAL',
-      quantity: Number(row.quantity) || 0,
-      unitCost: Number(row.unit_cost) || 0,
-      totalCost: Number(row.total_cost) || 0,
-      resultingStock: Number(row.resulting_stock) || 0,
-      resultingAverageCost: Number(row.resulting_average_cost) || 0,
-      date: row.date,
-      documentNumber: row.document_number || undefined,
-      notes: row.notes || undefined,
-      supplierOrCustomer: row.supplier_or_customer || undefined,
-      createdAt: row.created_at || new Date().toISOString(),
-    }));
-
-    const invoices: Invoice[] = (iRes.data || []).map((row: any) => ({
-      id: row.id,
-      number: row.number,
-      series: row.series,
-      issueDate: row.issue_date,
-      entryDate: row.entry_date,
-      accessKey: row.access_key,
-      destinationBranch: row.destination_branch || undefined,
-      supplier: row.supplier,
-      recipient: row.recipient || undefined,
-      totals: row.totals,
-      items: row.items,
-      boletos: Array.isArray(row.boletos) ? row.boletos : undefined,
-      status: row.status,
-      createdAt: row.created_at,
-    }));
-
-    const employees: Employee[] = (eRes.data || []).map((row: any) => ({
-      id: row.id,
-      registrationNumber: row.registration_number,
-      name: row.name,
-      cpf: row.cpf,
-      role: row.role,
-      department: row.department,
-      workShift: row.work_shift || '08:00 às 17:00 (Segunda a Sexta)',
-      dailyHoursExpected: Number(row.daily_hours_expected) || 8,
-      pin: row.pin || undefined,
-      admissionDate: row.admission_date,
-      status: row.status || 'ATIVO',
-      hourlyRate: row.hourly_rate ? Number(row.hourly_rate) : undefined,
-      avatarInitials: row.avatar_initials || undefined,
-      phone: row.phone || undefined,
-      email: row.email || undefined,
-      updatedAt: row.updated_at,
-    }));
-
-    const punches: TimePunch[] = (tpRes.data || []).map((row: any) => ({
-      id: row.id,
-      employeeId: row.employee_id,
-      employeeName: row.employee_name,
-      date: row.date,
-      time: row.time,
-      timestamp: row.timestamp,
-      type: row.type,
-      source: row.source,
-      nsr: Number(row.nsr),
-      notes: row.notes || undefined,
-      device: row.device || undefined,
-    }));
-
-    const advances: SalaryAdvance[] = (saRes.data || []).map((row: any) => ({
-      id: row.id,
-      employeeId: row.employee_id,
-      employeeName: row.employee_name,
-      employeeRegistration: row.employee_registration,
-      employeeRole: row.employee_role || undefined,
-      employeeDepartment: row.employee_department || undefined,
-      date: row.date,
-      competenceMonth: row.competence_month,
-      amount: Number(row.amount) || 0,
-      paymentMethod: row.payment_method,
-      category: row.category || 'OUTRO',
-      reason: row.reason,
-      status: row.status,
-      approvedBy: row.approved_by || undefined,
-      receiptSigned: Boolean(row.receipt_signed),
-      notes: row.notes || undefined,
-      createdAt: row.created_at,
-    }));
-
-    let companySettings: CompanySettings | undefined = undefined;
-    if (csRes.data && csRes.data.length > 0) {
-      const cs = csRes.data[0];
-      companySettings = {
-        name: cs.name,
-        tradeName: cs.trade_name,
-        cnpj: cs.cnpj,
-        stateRegistration: cs.state_registration || undefined,
-        phone: cs.phone || undefined,
-        email: cs.email || undefined,
-        address: cs.address || undefined,
-        cityState: cs.city_state || undefined,
-        logoUrl: cs.logo_url || undefined,
-      };
-    }
-
-    const billings: BillingRecord[] = (bRes.data || []).map((row: any) => ({
-      id: row.id,
-      date: row.date,
-      serviceOrderNumber: row.service_order_number,
-      collaboratorName: row.collaborator_name || undefined,
-      collaboratorId: row.collaborator_id || undefined,
-      productsTotal: Number(row.products_total) || 0,
-      alignmentBalancingTotal: Number(row.alignment_balancing_total) || 0,
-      servicesTotal: Number(row.services_total) || 0,
-      grandTotal: Number(row.grand_total) || 0,
-      customerName: row.customer_name || undefined,
-      vehiclePlate: row.vehicle_plate || undefined,
-      vehicleModel: row.vehicle_model || undefined,
-      paymentMethod: row.payment_method || 'PIX',
-      notes: row.notes || undefined,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    }));
-
-    const expenses: ExpenseRecord[] = (expRes.data || []).map((row: any) => ({
-      id: row.id,
-      description: row.description,
-      category: row.category,
-      customCategoryName: row.custom_category_name || undefined,
-      amount: Number(row.amount) || 0,
-      dueDate: row.due_date,
-      paymentDate: row.payment_date || undefined,
-      paymentTime: row.payment_time || undefined,
-      competenceMonth: row.competence_month,
-      status: row.status,
-      paymentMethod: row.payment_method,
-      supplierOrBeneficiary: row.supplier_or_beneficiary || '',
-      documentNumber: row.document_number || undefined,
-      notes: row.notes || undefined,
-      isRecurring: Boolean(row.is_recurring),
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    }));
-
-    const boletos: InvoiceBoleto[] = (bolRes.data || []).map((row: any) => ({
-      id: row.id,
-      invoiceId: row.invoice_id || undefined,
-      invoiceNumber: row.invoice_number || undefined,
-      supplierName: row.supplier_name || undefined,
-      supplierCnpj: row.supplier_cnpj || undefined,
-      destinationBranch: row.destination_branch || undefined,
-      barcode: row.barcode,
-      amount: Number(row.amount) || 0,
-      dueDate: row.due_date,
-      installmentNumber: row.installment_number ? Number(row.installment_number) : 1,
-      totalInstallments: row.total_installments ? Number(row.total_installments) : 1,
-      status: row.status,
-      paidAt: row.paid_at || undefined,
-      paymentTime: row.payment_time || undefined,
-      paidAmount: row.paid_amount ? Number(row.paid_amount) : undefined,
-      paymentMethod: row.payment_method || undefined,
-      notes: row.notes || undefined,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    }));
-
-    return {
-      success: true,
-      data: {
-        products,
-        movements,
-        invoices,
-        employees,
-        punches,
-        advances,
-        companySettings,
-        billings,
-        expenses,
-        boletos,
-      },
-    };
-  } catch (err: any) {
-    return {
-      success: false,
-      error: err.message || 'Erro ao carregar dados do Supabase',
-    };
-  }
 }

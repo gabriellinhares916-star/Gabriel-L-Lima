@@ -162,12 +162,37 @@ export function reopenStoredBoleto(id: string): { success: boolean; boletos: Inv
 }
 
 /**
- * Exclui um boleto
+ * Exclui um boleto do armazenamento e desvincula de qualquer nota fiscal associada
  */
 export function deleteStoredBoleto(id: string): { success: boolean; boletos: InvoiceBoleto[] } {
   const current = getStoredBoletos();
   const filtered = current.filter(b => b.id !== id);
   saveStoredBoletos(filtered);
+
+  // Também remove o boleto do array boletos da nota fiscal vinculada
+  try {
+    const raw = localStorage.getItem('nfe_stock_invoices_v1');
+    if (raw) {
+      const invoices: Invoice[] = JSON.parse(raw);
+      let changed = false;
+      const updatedInvoices = invoices.map(inv => {
+        if (inv.boletos && inv.boletos.some(b => b.id === id)) {
+          changed = true;
+          return {
+            ...inv,
+            boletos: inv.boletos.filter(b => b.id !== id),
+          };
+        }
+        return inv;
+      });
+      if (changed) {
+        localStorage.setItem('nfe_stock_invoices_v1', JSON.stringify(updatedInvoices));
+      }
+    }
+  } catch (err) {
+    console.warn('Erro ao desvincular boleto da nota fiscal:', err);
+  }
+
   return { success: true, boletos: filtered };
 }
 

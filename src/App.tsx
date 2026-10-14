@@ -71,6 +71,7 @@ import {
   syncCompanySettingsToSupabase,
   syncBillingsToSupabase,
   syncExpensesToSupabase,
+  syncBoletosToSupabase,
 } from './utils/supabaseClient';
 import { Navbar } from './components/Navbar';
 import { Dashboard } from './components/Dashboard';
@@ -399,6 +400,7 @@ export default function App() {
     const res = addStoredBoleto(boletoData);
     if (res.success) {
       setBoletos(res.boletos);
+      syncBoletosToSupabase(res.boletos).catch(() => {});
       showToast(`Boleto de ${res.boleto.supplierName || 'Fornecedor'} cadastrado com sucesso!`);
     }
   };
@@ -407,6 +409,7 @@ export default function App() {
     const res = updateStoredBoleto(id, updates);
     if (res.success) {
       setBoletos(res.boletos);
+      syncBoletosToSupabase(res.boletos).catch(() => {});
       showToast('Boleto atualizado com sucesso.');
     }
   };
@@ -415,6 +418,7 @@ export default function App() {
     const res = payStoredBoleto(id, paymentData);
     if (res.success) {
       setBoletos(res.boletos);
+      syncBoletosToSupabase(res.boletos).catch(() => {});
       showToast('Baixa no boleto liquidada com sucesso!');
     }
   };
@@ -423,6 +427,7 @@ export default function App() {
     const res = reopenStoredBoleto(id);
     if (res.success) {
       setBoletos(res.boletos);
+      syncBoletosToSupabase(res.boletos).catch(() => {});
       showToast('Boleto reaberto como pendente.');
     }
   };
@@ -431,6 +436,8 @@ export default function App() {
     const res = deleteStoredBoleto(id);
     if (res.success) {
       setBoletos(res.boletos);
+      setInvoices(getStoredInvoices());
+      syncBoletosToSupabase(res.boletos).catch(() => {});
       showToast('Boleto excluído com sucesso.');
     }
   };
@@ -652,6 +659,7 @@ export default function App() {
             invoices={invoices}
             onNavigateToNewEntry={() => setCurrentTab('entry')}
             onNavigateToBoletos={() => setCurrentTab('boletos')}
+            onDeleteBoleto={handleDeleteBoleto}
           />
         )}
 
@@ -709,6 +717,8 @@ export default function App() {
           advances,
           companySettings,
           billings,
+          expenses,
+          boletos,
         }}
         onSyncComplete={(msg) => showToast(msg)}
       />

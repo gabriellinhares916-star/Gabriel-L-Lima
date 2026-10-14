@@ -20,7 +20,8 @@ import {
   Check,
   CheckCircle2,
   Clock,
-  AlertTriangle
+  AlertTriangle,
+  Trash2
 } from 'lucide-react';
 import { exportInvoicesCSV } from '../utils/csvExport';
 
@@ -28,18 +29,21 @@ interface InvoicesListProps {
   invoices: Invoice[];
   onNavigateToNewEntry: () => void;
   onNavigateToBoletos?: () => void;
+  onDeleteBoleto?: (id: string) => void;
 }
 
 export const InvoicesList: React.FC<InvoicesListProps> = ({
   invoices,
   onNavigateToNewEntry,
   onNavigateToBoletos,
+  onDeleteBoleto,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [destinationFilter, setDestinationFilter] = useState<'ALL' | InvoiceDestination>('ALL');
   const [selectedInvoiceForDanfe, setSelectedInvoiceForDanfe] = useState<Invoice | null>(null);
   const [expandedInvoiceId, setExpandedInvoiceId] = useState<string | null>(null);
   const [copiedKeyId, setCopiedKeyId] = useState<string | null>(null);
+  const [boletoToDelete, setBoletoToDelete] = useState<{ id: string; amount: number; supplierName?: string; invoiceNumber?: string } | null>(null);
 
   const filteredInvoices = invoices.filter(inv => {
     // Destination filter
@@ -359,11 +363,28 @@ export const InvoicesList: React.FC<InvoicesListProps> = ({
                                   <span className="font-bold text-slate-800">
                                     Parcela {bol.installmentNumber || bIdx + 1} de {invoice.boletos?.length}
                                   </span>
-                                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                    isPaid ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
-                                  }`}>
-                                    {bol.status}
-                                  </span>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                      isPaid ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                                    }`}>
+                                      {bol.status}
+                                    </span>
+                                    {onDeleteBoleto && (
+                                      <button
+                                        type="button"
+                                        onClick={() => setBoletoToDelete({
+                                          id: bol.id,
+                                          amount: bol.amount,
+                                          supplierName: bol.supplierName || invoice.supplier.name,
+                                          invoiceNumber: invoice.number
+                                        })}
+                                        className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors cursor-pointer"
+                                        title="Excluir boleto"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    )}
+                                  </div>
                                 </div>
                                 <div className="flex items-center justify-between text-slate-600 font-semibold">
                                   <span>Vencimento: {formatDateBR(bol.dueDate)}</span>
@@ -437,6 +458,57 @@ export const InvoicesList: React.FC<InvoicesListProps> = ({
           invoice={selectedInvoiceForDanfe}
           onClose={() => setSelectedInvoiceForDanfe(null)}
         />
+      )}
+
+      {/* Modal de Confirmação de Exclusão de Boleto */}
+      {boletoToDelete && onDeleteBoleto && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="w-12 h-12 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto border border-rose-100">
+              <Trash2 className="w-6 h-6" />
+            </div>
+
+            <div className="text-center space-y-1.5">
+              <h3 className="text-base font-bold text-slate-900">
+                Excluir Boleto Bancário?
+              </h3>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Deseja realmente excluir o boleto de{' '}
+                <strong className="text-rose-700 font-bold">{formatBRL(boletoToDelete.amount)}</strong>
+                {boletoToDelete.supplierName ? (
+                  <> do fornecedor <strong className="text-slate-800">{boletoToDelete.supplierName}</strong></>
+                ) : ''}?
+              </p>
+              {boletoToDelete.invoiceNumber && (
+                <div className="text-[11px] text-slate-500 font-mono bg-slate-50 p-2 rounded-lg border border-slate-200 mt-2">
+                  NF-e nº <strong>{boletoToDelete.invoiceNumber}</strong>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setBoletoToDelete(null)}
+                className="flex-1 px-4 py-2.5 border border-slate-300 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const id = boletoToDelete.id;
+                  setBoletoToDelete(null);
+                  onDeleteBoleto(id);
+                }}
+                className="flex-1 px-4 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Sim, Excluir</span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

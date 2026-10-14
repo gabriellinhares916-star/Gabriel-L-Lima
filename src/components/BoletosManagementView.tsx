@@ -88,6 +88,9 @@ export const BoletosManagementView: React.FC<BoletosManagementViewProps> = ({
   // Clipboard toast
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
+  // Modal de Exclusão de Boleto
+  const [boletoToDelete, setBoletoToDelete] = useState<InvoiceBoleto | null>(null);
+
   const todayStr = getTodayDateStr();
 
   // Handle Copy Barcode
@@ -848,11 +851,9 @@ export const BoletosManagementView: React.FC<BoletosManagementViewProps> = ({
                       <button
                         type="button"
                         onClick={() => {
-                          if (confirm(`Tem certeza que deseja excluir o boleto de R$ ${boleto.amount.toFixed(2)} de ${boleto.supplierName || 'Fornecedor'}?`)) {
-                            onDeleteBoleto(boleto.id);
-                          }
+                          setBoletoToDelete(boleto);
                         }}
-                        className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors border border-transparent hover:border-rose-200"
+                        className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors border border-transparent hover:border-rose-200 cursor-pointer"
                         title="Excluir boleto"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -1209,6 +1210,60 @@ export const BoletosManagementView: React.FC<BoletosManagementViewProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE CONFIRMAÇÃO DE EXCLUSÃO DE BOLETO */}
+      {boletoToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="w-12 h-12 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto border border-rose-100">
+              <Trash2 className="w-6 h-6" />
+            </div>
+
+            <div className="text-center space-y-1.5">
+              <h3 className="text-base font-bold text-slate-900">
+                Excluir Boleto Bancário?
+              </h3>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Tem certeza que deseja excluir o boleto no valor de{' '}
+                <strong className="text-rose-700 font-bold">{formatBRL(boletoToDelete.amount)}</strong>
+                {boletoToDelete.supplierName ? (
+                  <> do favorecido <strong className="text-slate-800">{boletoToDelete.supplierName}</strong></>
+                ) : ''}?
+              </p>
+              {boletoToDelete.invoiceNumber && (
+                <div className="text-[11px] text-slate-500 font-mono bg-slate-50 p-2 rounded-lg border border-slate-200 mt-2">
+                  Vinculado à NF-e nº <strong>{boletoToDelete.invoiceNumber}</strong>
+                </div>
+              )}
+              <p className="text-[11px] text-slate-400">
+                Esta ação removerá o boleto e o desvinculará da nota fiscal permanentemente.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setBoletoToDelete(null)}
+                className="flex-1 px-4 py-2.5 border border-slate-300 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const idToDelete = boletoToDelete.id;
+                  setBoletoToDelete(null);
+                  onDeleteBoleto(idToDelete);
+                }}
+                className="flex-1 px-4 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Sim, Excluir</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
